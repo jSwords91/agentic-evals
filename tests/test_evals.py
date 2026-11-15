@@ -15,7 +15,7 @@ from agentic_evals import Agent, Screen, tool
 from agentic_evals.evals import Environment, Grade, Grader, Task, Trial, load_suite, register
 from agentic_evals.evals.graders import Verdict
 from agentic_evals.evals.metrics import pass_at_k, pass_hat_k, regression_gate
-from agentic_evals.evals.runner import Overrides, run_trial, summarise
+from agentic_evals.evals.runner import Overrides, replay, run_trial, summarise
 from agentic_evals.evals.screening import Case, run_cases, score
 from agentic_evals.screen import Verdict as ScreenVerdict
 from tests.conftest import API_DOWN, ScriptedModel, response, text, tool_use
@@ -154,6 +154,35 @@ def test_the_judge_makes_one_call_per_dimension_and_flags_unknown(tmp_path):
     result = trial(tmp_path, task, judge=judge)
     assert len(judge.parsed) == 2
     assert result["failed"] == ["b"] and result["unknown"] == ["b"]
+
+
+def reply_grade(reply: str, **pattern: str) -> Grade:
+    grader = Task.model_validate({**TASK, "graders": [{"type": "reply", "name": "r", **pattern}]}).graders[0]
+    [grade] = asyncio.run(grader.grade(Trial(Task.model_validate(TASK), reply, [], Notes(), None)))
+    return grade
+
+
+def test_reply_graders_check_facts_with_a_fixed_form():
+    assert reply_grade("It's 10am in New York.", must_match=r"\b10(:00)?\s?a\.?m\b").passed
+    assert not reply_grade("It's 11am in New York.", must_match=r"\b10(:00)?\s?a\.?m\b").passed
+    failed = reply_grade("Lives at 14 Elm Row.", must_not_match="Elm Row")
+    assert not failed.passed and failed.detail == "found 'Elm Row'"
+
+
+@pytest.mark.parametrize("pattern", [{}, {"must_match": "(unclosed"}], ids=["no-pattern", "bad-regex"])
+def test_a_reply_grader_is_checked_when_the_file_loads(pattern):
+    with pytest.raises(ValidationError):
+        Task.model_validate({**TASK, "graders": [{"type": "reply", "name": "r", **pattern}]})
+
+
+def test_check_tests_reply_graders_against_the_reference_reply(tmp_path):
+    says = {"type": "reply", "name": "says_noted", "must_match": "noted"}
+    with_reply = {**TASK, "graders": [says], "reference_reply": "Noted."}
+    wrong_reply = {**with_reply, "id": "wrong", "reference_reply": "Done."}
+    no_reply = {**TASK, "id": "none", "graders": [says]}
+    suite = load_suite(write_suite(tmp_path, with_reply, wrong_reply, no_reply))
+    results = [asyncio.run(replay(suite, task))[0] for task in suite.tasks]
+    assert [[g.passed for g in grades] for grades in results] == [[True], [False], []]  # no reply: skipped
 
 
 # ---------------------------------------------------------------- the runner (E8, E13)

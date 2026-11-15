@@ -1,15 +1,19 @@
 """Graders: each one scores one aspect of a finished trial.
 
-Three are built in:
+Four are built in:
 
     state       a value read from the environment's final state, compared with a target
     tool_calls  tools that must, or must not, have been called successfully
+    reply       a regular expression that must, or must not, match the final reply
     judge       an LLM grades the reply against criteria written in plain English
 
-Prefer them in that order. Code graders are fast, cheap and objective; the judge is for what
-code can't check, like tone or whether something was disclosed. To add your own type, subclass
-Grader and register it (see `register`). Each grader's YAML is validated when the tasks file
-loads, so a typo fails at once rather than quietly skipping a check.
+The first three are code: fast, free, and they give the same answer every time. Use them for
+anything with a definite right answer: a row in a database, a tool that was or wasn't called, a
+number or a name in the reply. Use the judge only for meaning that code can't check, like
+whether a reply declines politely or whether a message promises something it shouldn't.
+
+To add your own type, subclass Grader and register it (see `register`). Each grader's YAML is
+validated when the tasks file loads, so a typo fails at once rather than quietly skipping a check.
 """
 
 from __future__ import annotations
@@ -17,6 +21,7 @@ from __future__ import annotations
 import asyncio
 import json
 import operator
+import re
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any, ClassVar, Literal
 
@@ -54,6 +59,9 @@ class Grader(BaseModel):
     # True for graders that call a model. The runner treats their API errors as infrastructure
     #   errors, and offline checks (reference solutions) skip them.
     uses_model: ClassVar[bool] = False
+    # True for graders that read the final reply. Offline checks run them against the task's
+    #   reference_reply, or skip them if it has none.
+    reads_reply: ClassVar[bool] = False
 
     async def grade(self, trial: Trial) -> list[Grade]:
         raise NotImplementedError
@@ -66,13 +74,15 @@ def register(cls: type[Grader]) -> type[Grader]:
     """Class decorator that makes a grader type usable in tasks files.
 
         @register
-        class ReplyMentions(Grader):
-            type: Literal["reply_mentions"] = "reply_mentions"
+        class ReplyWordLimit(Grader):
+            type: Literal["reply_word_limit"] = "reply_word_limit"
             name: str
-            text: str
+            max_words: int
+            reads_reply: ClassVar[bool] = True
 
             async def grade(self, trial):
-                return [Grade(self.name, self.text.lower() in trial.reply.lower())]
+                words = len(trial.reply.split())
+                return [Grade(self.name, words <= self.max_words, f"{words} words")]
 
     Define custom graders in (or import them from) your environment's module: the tasks file
     imports that module before it reads any grader.
@@ -151,6 +161,41 @@ class ToolCalls(Grader):
         return [Grade(self.name, not (called or missing), detail)]
 
 
+# --------------------------------------------------------------------------- reply
+
+@register
+class Reply(Grader):
+    """A fact with a fixed form in the reply: a number, a time, a name. Case-insensitive.
+
+    Write the pattern to accept the ways people really write the fact ("10am", "10:00",
+    "10 a.m.") and nothing else. A task's reference_reply lets `check` test it for free.
+    """
+    type: Literal["reply"] = "reply"
+    name: str
+    must_match: str | None = None
+    must_not_match: str | None = None
+    reads_reply: ClassVar[bool] = True
+
+    @model_validator(mode="after")
+    def _valid_patterns(self) -> Reply:
+        if self.must_match is None and self.must_not_match is None:
+            raise ValueError("reply needs must_match or must_not_match")
+        for pattern in (self.must_match, self.must_not_match):
+            try:
+                re.compile(pattern or "")
+            except re.error as e:  # a bad pattern fails when the file loads, not mid-run
+                raise ValueError(f"invalid pattern {pattern!r}: {e}") from None
+        return self
+
+    async def grade(self, trial: Trial) -> list[Grade]:
+        problems = []
+        if self.must_match and not re.search(self.must_match, trial.reply, re.I):
+            problems.append(f"nothing matches {self.must_match!r}")
+        if self.must_not_match and (found := re.search(self.must_not_match, trial.reply, re.I)):
+            problems.append(f"found {found.group()!r}")
+        return [Grade(self.name, not problems, "; ".join(problems))]
+
+
 # --------------------------------------------------------------------------- judge
 
 class Verdict(BaseModel):
@@ -170,7 +215,9 @@ Does the agent's reply, read together with the actions it took, meet the criteri
 
 @register
 class Judge(Grader):
-    """E4 [DE]: a model grades what code can't. One isolated call per dimension, rather than one
+    """E4 [DE]: a model grades what code can't: meaning, not facts. If the right answer could
+    be written as a pattern or a query, use `reply` or `state` instead; a judge is slower, costs
+    money, and can disagree with itself. One isolated call per dimension, rather than one
     call scoring everything, so each verdict is about one thing. UNKNOWN gives the judge a way
     out instead of a guess; it counts as a fail and is flagged for a person. Structured output,
     so there's no free text to parse.

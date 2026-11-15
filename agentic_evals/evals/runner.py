@@ -140,9 +140,10 @@ def summarise(tasks: list[Task], trials: list[dict[str, Any]], k: int) -> dict[s
 async def replay(suite: Suite, task: Task) -> tuple[list[Grade], list[ToolCall]]:
     """E9: run a task's reference solution with no model, then apply its code graders.
 
-    Every grade should pass. If one doesn't, the task can't be solved as written or a grader is
-    wrong, and you've found out for free, before any trial spends money. Returns the grades and
-    the tool calls, so a caller can also spot a reference step that errored.
+    Graders that read the reply are checked against the task's reference_reply, and skipped if
+    it has none. Every grade should pass. If one doesn't, the task can't be passed as written or
+    a grader is wrong, and you've found out for free, before any trial spends money. Returns the
+    grades and the tool calls, so a caller can also spot a reference step that errored.
     """
     with tempfile.TemporaryDirectory() as tmp:
         env = suite.new_environment()
@@ -151,8 +152,10 @@ async def replay(suite: Suite, task: Task) -> tuple[list[Grade], list[ToolCall]]
         async with agent.session() as session:
             for name, args in task.reference_solution:
                 await session.call_tool(name, args)
-        trial = Trial(task, "", session.tool_log, env, judge_client=None)
-        grades = [g for spec in task.graders if not spec.uses_model for g in await spec.grade(trial)]
+        trial = Trial(task, task.reference_reply or "", session.tool_log, env, judge_client=None)
+        checkable = [g for g in task.graders
+                     if not g.uses_model and (task.reference_reply is not None or not g.reads_reply)]
+        grades = [grade for spec in checkable for grade in await spec.grade(trial)]
         return grades, session.tool_log
 
 

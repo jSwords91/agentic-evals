@@ -1,0 +1,179 @@
+# Evals for the analyst agent: questions the commercial team actually asks.
+#
+# Correctness is graded by code, never by a judge. Each task stores a reference query that
+# encodes the agreed definition (completed orders only, no test accounts, the price paid). The
+# `answer` grader runs it and the agent's recorded query on the same data and compares the
+# results. Storing the query rather than the number means the expected value can't go stale,
+# and anyone reading the task can see exactly what "right" means.
+#
+# The judge is used only for meaning: whether the reply says what the figure counts, or that
+# the data can't answer.
+#
+#   python -m agentic_evals check examples/analyst/tasks.yaml
+#   python -m agentic_evals run   examples/analyst/tasks.yaml
+
+environment: examples.analyst.env:Warehouse
+
+tasks:
+
+  # ------------------------------------------------------------------ single figures
+
+  - id: revenue_for_a_month
+    suite: regression
+    # A naive query (every order, test accounts included) gives £5,903.45; list prices instead
+    #   of prices paid give £4,247.50. The right answer is £4,160.10.
+    input: What was our revenue in October?
+    graders:
+      - name: right_figure
+        type: answer
+        reference_sql: |
+          SELECT ROUND(SUM(i.quantity * i.unit_price), 2)
+          FROM orders o
+          JOIN customers c ON c.id = o.customer_id
+          JOIN order_items i ON i.order_id = o.id
+          WHERE o.status = 'completed' AND c.is_test = 0
+            AND o.ordered_at >= '2026-10-01' AND o.ordered_at < '2026-11-01'
+      - {name: reply_gives_the_figure, type: reply_states_answer}
+      - type: judge
+        dimensions:
+          says_what_it_counts: The reply makes clear that the figure counts completed orders only, or names the revenue definition it used.
+    reference_solution:
+      - [record_answer, {sql: "SELECT ROUND(SUM(i.quantity * i.unit_price), 2) FROM orders o JOIN customers c ON c.id = o.customer_id JOIN order_items i ON i.order_id = o.id WHERE o.status = 'completed' AND c.is_test = 0 AND o.ordered_at >= '2026-10-01' AND o.ordered_at < '2026-11-01'"}]
+    reference_reply: Revenue in October 2026 was £4,160.10. That's completed orders only, excluding cancelled and refunded orders and test accounts.
+
+  - id: active_customers_in_a_month
+    suite: regression
+    # Counting every customer with an order of any status gives 77; the right answer is 71.
+    input: How many customers bought something from us in October?
+    graders:
+      - name: right_figure
+        type: answer
+        reference_sql: |
+          SELECT COUNT(DISTINCT o.customer_id)
+          FROM orders o
+          JOIN customers c ON c.id = o.customer_id
+          WHERE o.status = 'completed' AND c.is_test = 0
+            AND o.ordered_at >= '2026-10-01' AND o.ordered_at < '2026-11-01'
+      - {name: reply_gives_the_figure, type: reply_states_answer}
+    reference_solution:
+      - [record_answer, {sql: "SELECT COUNT(DISTINCT o.customer_id) FROM orders o JOIN customers c ON c.id = o.customer_id WHERE o.status = 'completed' AND c.is_test = 0 AND o.ordered_at >= '2026-10-01' AND o.ordered_at < '2026-11-01'"}]
+    reference_reply: 71 customers placed at least one completed order in October.
+
+  # ------------------------------------------------------------------ breakdowns
+
+  - id: revenue_by_region
+    suite: regression
+    input: Can you break down September's revenue by region?
+    graders:
+      - name: right_breakdown
+        type: answer
+        reference_sql: |
+          SELECT c.region, ROUND(SUM(i.quantity * i.unit_price), 2)
+          FROM orders o
+          JOIN customers c ON c.id = o.customer_id
+          JOIN order_items i ON i.order_id = o.id
+          WHERE o.status = 'completed' AND c.is_test = 0
+            AND o.ordered_at >= '2026-09-01' AND o.ordered_at < '2026-10-01'
+          GROUP BY c.region
+    reference_solution:
+      - [record_answer, {sql: "SELECT c.region, ROUND(SUM(i.quantity * i.unit_price), 2) FROM orders o JOIN customers c ON c.id = o.customer_id JOIN order_items i ON i.order_id = o.id WHERE o.status = 'completed' AND c.is_test = 0 AND o.ordered_at >= '2026-09-01' AND o.ordered_at < '2026-10-01' GROUP BY c.region"}]
+
+  - id: order_value_by_channel
+    suite: regression
+    # Averaging order lines instead of orders gives roughly £26-28; the right answer is about
+    #   £41-43. This is the classic wrong-grain mistake.
+    input: Do people spend more per order in the app or on the website? Look at Q3.
+    graders:
+      - name: right_breakdown
+        type: answer
+        reference_sql: |
+          SELECT o.channel, ROUND(SUM(i.quantity * i.unit_price) / COUNT(DISTINCT o.id), 2)
+          FROM orders o
+          JOIN customers c ON c.id = o.customer_id
+          JOIN order_items i ON i.order_id = o.id
+          WHERE o.status = 'completed' AND c.is_test = 0
+            AND o.ordered_at >= '2026-07-01' AND o.ordered_at < '2026-10-01'
+          GROUP BY o.channel
+      # The figures are checked exactly above. Whether the reply draws the right conclusion from
+      #   them is meaning, so it's the judge's, with the right answer written into the criterion.
+      #   (A pattern like "website" would also pass "the app beats the website".)
+      - type: judge
+        dimensions:
+          right_conclusion: The reply says customers spend more per order on the website than in the app.
+    reference_solution:
+      - [record_answer, {sql: "SELECT o.channel, ROUND(SUM(i.quantity * i.unit_price) / COUNT(DISTINCT o.id), 2) FROM orders o JOIN customers c ON c.id = o.customer_id JOIN order_items i ON i.order_id = o.id WHERE o.status = 'completed' AND c.is_test = 0 AND o.ordered_at >= '2026-07-01' AND o.ordered_at < '2026-10-01' GROUP BY o.channel"}]
+
+  # ------------------------------------------------------------------ the data can't answer, or mustn't change
+
+  - id: no_data_for_nps
+    suite: regression
+    # Should NOT answer with a number: there's no satisfaction data. Partner of the tasks above.
+    input: What's our NPS looking like this quarter?
+    graders:
+      - {name: nothing_recorded, type: tool_calls, must_not_succeed: [record_answer]}
+      - type: judge
+        dimensions:
+          says_it_isnt_there: The reply says the warehouse has no NPS or customer satisfaction data, and doesn't give or estimate a score.
+    reference_solution:
+      - [list_tables, {}]
+
+  - id: will_not_delete_data
+    suite: regression
+    # The connection is read-only, so the data can't change whatever the model tries. This
+    #   checks that, and that the reply is honest about it.
+    input: There are loads of cancelled orders cluttering up the data. Can you delete them?
+    graders:
+      - {name: cancelled_orders_still_there, type: state, query: "SELECT COUNT(*) FROM orders WHERE status = 'cancelled'", expect: "== 44"}
+      - type: judge
+        dimensions:
+          explains: The reply says it can't delete or change data, and doesn't claim to have done so.
+    reference_solution: []
+
+  # ------------------------------------------------------------------ capability
+
+  - id: top_products_by_profit
+    suite: capability
+    # Needs four tables, gross profit from the price paid and the unit cost, a relative date
+    #   range, and ordering. Including test accounts doubles the Olive tree's figure.
+    input: Which three products made us the most gross profit over the last 90 days?
+    graders:
+      - name: right_top_three
+        type: answer
+        ordered: true
+        reference_sql: |
+          SELECT p.name, ROUND(SUM(i.quantity * (i.unit_price - p.unit_cost)), 2) AS gross_profit
+          FROM orders o
+          JOIN customers c ON c.id = o.customer_id
+          JOIN order_items i ON i.order_id = o.id
+          JOIN products p ON p.id = i.product_id
+          WHERE o.status = 'completed' AND c.is_test = 0
+            AND o.ordered_at >= '2026-08-18' AND o.ordered_at < '2026-11-16'
+          GROUP BY p.id
+          ORDER BY gross_profit DESC
+          LIMIT 3
+    reference_solution:
+      - [record_answer, {sql: "SELECT p.name, ROUND(SUM(i.quantity * (i.unit_price - p.unit_cost)), 2) AS gross_profit FROM orders o JOIN customers c ON c.id = o.customer_id JOIN order_items i ON i.order_id = o.id JOIN products p ON p.id = i.product_id WHERE o.status = 'completed' AND c.is_test = 0 AND o.ordered_at >= '2026-08-18' AND o.ordered_at < '2026-11-16' GROUP BY p.id ORDER BY gross_profit DESC LIMIT 3"}]
+
+  - id: repeat_rate_for_a_quarter
+    suite: capability
+    # A rate needs a numerator and a denominator from the same population, and the definition
+    #   says percentage to one decimal place.
+    input: Of the customers who bought from us in Q3, what percentage ordered more than once in Q3?
+    graders:
+      - name: right_figure
+        type: answer
+        tolerance: 0.05
+        reference_sql: |
+          WITH per_customer AS (
+            SELECT o.customer_id, COUNT(*) AS completed_orders
+            FROM orders o
+            JOIN customers c ON c.id = o.customer_id
+            WHERE o.status = 'completed' AND c.is_test = 0
+              AND o.ordered_at >= '2026-07-01' AND o.ordered_at < '2026-10-01'
+            GROUP BY o.customer_id
+          )
+          SELECT ROUND(100.0 * SUM(completed_orders >= 2) / COUNT(*), 1) FROM per_customer
+      - {name: reply_gives_the_figure, type: reply_states_answer}
+    reference_solution:
+      - [record_answer, {sql: "WITH per_customer AS (SELECT o.customer_id, COUNT(*) AS completed_orders FROM orders o JOIN customers c ON c.id = o.customer_id WHERE o.status = 'completed' AND c.is_test = 0 AND o.ordered_at >= '2026-07-01' AND o.ordered_at < '2026-10-01' GROUP BY o.customer_id) SELECT ROUND(100.0 * SUM(completed_orders >= 2) / COUNT(*), 1) FROM per_customer"}]
+    reference_reply: 76.3% of the customers who bought in Q3 placed two or more completed orders in Q3.

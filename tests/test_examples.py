@@ -18,7 +18,7 @@ TASKS = [(name, task) for name, suite in SUITES.items() for task in suite.tasks]
 
 
 def test_every_example_has_a_tasks_file():
-    assert set(SUITES) == {"assistant", "helpdesk", "minimal"}
+    assert set(SUITES) == {"analyst", "assistant", "helpdesk", "minimal"}
 
 
 @pytest.mark.parametrize("example, task", TASKS, ids=[f"{n}/{t.id}" for n, t in TASKS])
@@ -27,6 +27,13 @@ def test_reference_solution_passes_every_code_grader(example, task):
     grades, calls = asyncio.run(replay(SUITES[example], task))
     assert all(g.passed for g in grades), grades
     assert not any(c.is_error for c in calls), calls
+
+
+@pytest.mark.parametrize("example, task", TASKS, ids=[f"{n}/{t.id}" for n, t in TASKS])
+def test_reply_graders_have_a_reference_reply(example, task):
+    """Without one, `check` can't test a reply pattern, and a wrong pattern goes unnoticed."""
+    if any(g.reads_reply for g in task.graders):
+        assert task.reference_reply is not None
 
 
 # ---------------------------------------------------------------- the helpdesk

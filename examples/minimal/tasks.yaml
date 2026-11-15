@@ -1,6 +1,10 @@
-# Evals for the minimal agent. With no state to check, every grader looks at the reply or the
-# tool calls. That's the smallest working setup: an agent, an environment with nothing in it,
-# and tasks.
+# Evals for the minimal agent. It changes nothing, so every grader looks at the tools it used or
+# at the reply. Each grader is the cheapest one that can check its fact:
+#
+#   the number in the reply        reply (a pattern)            code: there's one right answer
+#   the length of the reply        reply_word_limit (custom)    code: counting is exact
+#   "too long", or "keeps the      judge                        a model: these are questions of
+#   meaning"                                                    meaning, worded many ways
 #
 #   python -m agentic_evals check examples/minimal/tasks.yaml
 #   python -m agentic_evals run   examples/minimal/tasks.yaml
@@ -8,36 +12,45 @@
 environment: examples.minimal.env:Stateless
 
 tasks:
-  - id: counts_with_the_tool
+  - id: word_count_over_a_limit
     suite: regression
-    input: "How many words are in this sentence: 'The quick brown fox jumps over the lazy dog'?"
+    # The text is 36 words: one over the limit. The tool exists because models miscount, so
+    #   here the path matters in itself (E3) as well as the answer.
+    input: >
+      Is this short enough for the event listing? The limit is 35 words. "Join us for an evening
+      of live music in the old boathouse. Tickets include a drink on arrival, and food is
+      available from local traders. Doors open at 7pm and the first act starts at 7:45."
     graders:
-      # Here the path matters in itself: the tool exists because models miscount words.
       - {name: used_word_count, type: tool_calls, must_succeed: [word_count]}
+      - {name: says_36_words, type: reply, must_match: '\b36\b'}
+      # Whether the reply says "too long" can be worded many ways, including with a negation
+      #   ("it isn't short enough") that a pattern would misread. That's meaning: a judge's job.
       - type: judge
         dimensions:
-          right_count: The reply says the sentence has 9 words.
+          says_too_long: The reply says the text is too long for the 35-word limit.
     reference_solution:
-      - [word_count, {text: The quick brown fox jumps over the lazy dog}]
+      - [word_count, {text: "Join us for an evening of live music in the old boathouse. Tickets include a drink on arrival, and food is available from local traders. Doors open at 7pm and the first act starts at 7:45."}]
+    reference_reply: It's 36 words, so it's one over the 35-word limit. Dropping "old" from "old boathouse" would bring it to 35.
 
-  - id: no_tool_when_no_count_needed
+  - id: no_count_for_a_title
     suite: regression
-    # Should NOT use the tool. Partner of counts_with_the_tool.
-    input: Write one sentence describing autumn.
+    # Should NOT use the tool: nothing here needs counting. Partner of word_count_over_a_limit.
+    input: Can you suggest a title for a blog post about repotting houseplants?
     graders:
       - {name: no_word_count, type: tool_calls, must_not_succeed: [word_count]}
-      - type: judge
-        dimensions:
-          one_sentence: The reply is a single sentence about autumn.
     reference_solution: []
 
-  - id: shortens_and_checks
+  - id: shortened_for_a_sign
     suite: regression
-    input: "Shorten this to under 10 words, and check the count: 'We are writing to let you know that the office will be closed next Monday for maintenance.'"
+    input: >
+      Can you cut this down to under 10 words for a sign on the door? Just give me the new
+      wording. "Please be aware that the office will be closed next Monday for maintenance work."
     graders:
-      - {name: used_word_count, type: tool_calls, must_succeed: [word_count]}
+      - {name: checked_the_count, type: tool_calls, must_succeed: [word_count]}
+      - {name: under_ten_words, type: reply_word_limit, max_words: 9}
       - type: judge
         dimensions:
-          under_ten_words: The reply gives a shortened version of fewer than 10 words that still says the office is closed next Monday.
+          keeps_the_meaning: The new wording still says the office is closed next Monday.
     reference_solution:
       - [word_count, {text: Office closed next Monday for maintenance.}]
+    reference_reply: Office closed next Monday for maintenance.

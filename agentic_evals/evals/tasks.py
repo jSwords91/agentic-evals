@@ -25,9 +25,10 @@ E1 [DE]: the vocabulary used throughout:
 E6 [DE]: two suites. Regression tasks should pass nearly every time and gate every change.
   Capability tasks start with a low pass rate, giving you something to climb. They're reported
   but never block a merge, and graduate to regression once they pass reliably.
-E9 [DE]: a reference solution is a list of tool calls that passes every code grader. It proves
-  the task can be solved and the graders are configured correctly. `python -m agentic_evals
-  check` replays them with no model, for free.
+E9 [DE]: a reference solution is a list of tool calls that passes every code grader, and a
+  reference reply is a reply that passes the reply graders. Together they prove the task can be
+  passed and the graders are written correctly. `python -m agentic_evals check` replays them
+  with no model, for free.
 """
 
 from __future__ import annotations
@@ -50,6 +51,7 @@ class Task(BaseModel):
     input: str
     graders: list[Grader] = Field(min_length=1)
     reference_solution: list[tuple[str, dict[str, Any]]] = []
+    reference_reply: str | None = None  # a correct reply, to test the reply graders offline
 
     @field_validator("graders", mode="before")
     @classmethod

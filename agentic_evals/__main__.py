@@ -33,7 +33,9 @@ async def check(args: argparse.Namespace) -> int:
         grades, calls = await replay(suite, task)
         bad = [g for g in grades if not g.passed]
         failures += bool(bad)
-        print(f"  {'ok' if not bad else 'FAIL':6}{task.id}")
+        unchecked = any(g.reads_reply for g in task.graders) and task.reference_reply is None
+        print(f"  {'ok' if not bad else 'FAIL':6}{task.id}"
+              + ("  (reply graders not checked: add a reference_reply)" if unchecked else ""))
         for g in bad:
             print(f"        x {g.name}: {g.detail}")
         for c in calls:
