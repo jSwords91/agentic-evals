@@ -1,4 +1,4 @@
-"""A small Claude agent framework with task-based evals. Read it in this order:
+"""A Claude agent and the task-based evals that test it, written to be read and adapted. Read it in this order:
 
     tools.py    @tool: typed Python functions the model can call
     mcp.py      tools from MCP servers

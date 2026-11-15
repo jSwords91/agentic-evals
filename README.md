@@ -1,15 +1,18 @@
 # agentic-evals
 
-A small Python framework for building a Claude agent and testing it with task-based evals.
+A worked example of building a Claude agent and evaluating it with task-based evals.
 
-It has two halves. The agent half is an `Agent` class, a `@tool` decorator, MCP servers, skills
-and an injection screen. The eval half is a YAML tasks file, graders, pass^k, a CI gate and
-transcripts you can read. Both are generic. The example in `examples/assistant` uses them to
-build and evaluate an assistant that manages one person's email and calendar.
+It's a reference implementation, meant to be read, copied and changed, not installed and built
+on. The core is about 1,500 lines, including comments. Each design decision in it is labelled
+with an ID that links back to this README and to Anthropic's published guidance.
 
-The code is written to be read. The library is about 1,500 lines, including comments. Each
-design decision in it is labelled with an ID that links back to this README and to Anthropic's
-published guidance. Start with the example, then read the library in the order listed under
+There are two parts. The agent code is an `Agent` class, a `@tool` decorator, MCP servers,
+skills and an injection screen. The eval code is a YAML tasks file, graders, pass^k, a CI gate
+and transcripts you can read. Neither part knows anything about the example, so you can keep
+both and swap the example for your own. The example in `examples/assistant` is an assistant
+that manages one person's email and calendar.
+
+Start with the example, then read the code in the order listed under
 [Reading order](#reading-order).
 
 ## Quickstart

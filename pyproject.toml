@@ -1,7 +1,7 @@
 [project]
 name = "agentic-evals"
 version = "0.1.0"
-description = "A small Claude agent framework with task-based evals, written to be read"
+description = "A reference implementation of a Claude agent and the task-based evals that test it"
 readme = "README.md"
 license = "MIT"
 requires-python = ">=3.12"
