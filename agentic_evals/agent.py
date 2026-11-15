@@ -5,11 +5,9 @@
     async with agent.session() as session:
         reply = await session.send("What's on Thursday?")
 
-`Agent` is a definition: the prompt, the model, the tools and the limits. It's immutable, so one
-definition can be shared and run many times, and variants never touch the original:
-
-    agent.replace(model="claude-sonnet-5-5", effort="low")
-    agent.without_tools("send_email")       # an ablation: does this tool earn its place?
+`Agent` is a definition: the prompt, the model, the tools and the limits. Its tools are the list
+you pass in; to change them, change the list. It's immutable, so one definition can be shared and
+run many times.
 
 `Session` is one conversation with an agent. It owns the MCP connections, the message history,
 the record of tool calls and the bill. Every eval trial gets a fresh one.
@@ -24,7 +22,6 @@ A4 [MA]: the brain (model and prompt), the hands (tools and MCP servers) and the
 from __future__ import annotations
 
 import asyncio
-import dataclasses
 from collections.abc import Sequence
 from contextlib import AsyncExitStack
 from dataclasses import dataclass
@@ -64,25 +61,13 @@ class Agent:
     # E10 [docs]: Opus 5.5 always thinks, but by default returns the thinking empty. "summarized"
     #   puts a readable summary of its reasoning into every transcript, at no extra cost.
     thinking_display: str = "summarized"
-    excluded_tools: frozenset[str] = frozenset()
 
     def __post_init__(self) -> None:
         object.__setattr__(self, "tools", tuple(self.tools))
         object.__setattr__(self, "mcp_servers", tuple(self.mcp_servers))
-        object.__setattr__(self, "excluded_tools", frozenset(self.excluded_tools))
         check_priced(self.model)
         if self.screen:
             check_priced(self.screen.model)
-
-    def replace(self, **changes: Any) -> Agent:
-        return dataclasses.replace(self, **changes)
-
-    def with_tools(self, *tools: Tool) -> Agent:
-        return self.replace(tools=(*self.tools, *tools))
-
-    def without_tools(self, *names: str) -> Agent:
-        """Leave out tools by name, local or MCP. Checked when a session starts."""
-        return self.replace(excluded_tools=self.excluded_tools | set(names))
 
     def session(self, client: anthropic.AsyncAnthropic | None = None) -> Session:
         return Session(self, client)
@@ -133,7 +118,7 @@ class Session:
                 skills = load_skills(self.agent.skills)
                 tools.append(load_skill_tool(skills))
                 self.system += "\n\n" + skills_prompt(skills)
-            self.tools = _select(tools, self.agent.excluded_tools)
+            self.tools = _index(tools)
             self._stack = stack.pop_all()
         return self
 
@@ -252,15 +237,13 @@ class Session:
         return verdict
 
 
-def _select(tools: list[Tool], excluded: frozenset[str]) -> dict[str, Tool]:
+def _index(tools: list[Tool]) -> dict[str, Tool]:
     names = [t.name for t in tools]
     if duplicates := sorted({n for n in names if names.count(n) > 1}):
         raise ValueError(f"More than one tool is called {', '.join(duplicates)}.")
-    if unknown := sorted(excluded - set(names)):
-        raise ValueError(f"Can't exclude {', '.join(unknown)}: no tool has that name.")
     # C3: a fixed order. The tool list is the first thing in every request, so any change to it
     #   (even its order) would invalidate the whole cache.
-    return {t.name: t for t in sorted(tools, key=lambda t: t.name) if t.name not in excluded}
+    return {t.name: t for t in sorted(tools, key=lambda t: t.name)}
 
 
 def _result(tool_use_id: str, content: str, is_error: bool) -> dict[str, Any]:

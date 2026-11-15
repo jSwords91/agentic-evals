@@ -57,8 +57,7 @@ async def run(args: argparse.Namespace) -> int:
         raise SystemExit(f"No task called {', '.join(unknown)} in {args.tasks}.")
     tasks = [t for t in suite.tasks
              if args.suite in ("all", t.suite) and (not args.task or t.id in args.task)]
-    overrides = Overrides(model=args.model, effort=args.effort, no_screen=args.no_screen,
-                          without_tools=tuple(args.without_tool))
+    overrides = Overrides(model=args.model, effort=args.effort, no_screen=args.no_screen)
     await preflight()
     trials = await run_suite(suite, tasks, args.trials, overrides, args.results, args.concurrency)
     summary = summarise(tasks, trials, k)
@@ -110,8 +109,6 @@ def main() -> int:
     p.add_argument("--model", help="override the agent's model")
     p.add_argument("--effort", help="override the agent's effort")
     p.add_argument("--no-screen", action="store_true", help="turn off the injection screen")
-    p.add_argument("--without-tool", action="append", default=[], metavar="NAME",
-                   help="leave a tool out (repeatable): does it earn its place?")
     p.add_argument("--gate", type=float, help="exit 1 unless mean regression pass^k reaches this")
     p.add_argument("--compare", type=Path, help="an earlier results JSON to compare against")
     p.add_argument("--concurrency", type=int, default=4)

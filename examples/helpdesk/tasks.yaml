@@ -1,0 +1,104 @@
+# Evals for the helpdesk agent. The tasks check what the agent wrote to the ticket database
+# (`state`), what it said to the requester (`judge`, which sees the reply_to_requester message
+# in the tool calls), and, for a question, that it changed nothing (`tool_calls`).
+#
+#   python -m agentic_evals check examples/helpdesk/tasks.yaml
+#   python -m agentic_evals run   examples/helpdesk/tasks.yaml
+
+environment: examples.helpdesk.env:Helpdesk
+
+tasks:
+  - id: known_incident_is_normal
+    suite: regression
+    # The fixed status page shows a VPN incident, so this is normal priority, not urgent.
+    #   Only check_service_status can tell this ticket apart from office_outage_is_urgent.
+    input: Triage ticket 101.
+    graders:
+      - {name: network_normal, type: state, query: "SELECT COUNT(*) FROM tickets WHERE id = 101 AND team = 'network' AND priority = 'normal'", expect: "== 1"}
+      - {name: replied, type: state, query: "SELECT COUNT(*) FROM replies WHERE ticket_id = 101", expect: "== 1"}
+      - type: judge
+        dimensions:
+          mentions_incident: The message to the requester says there's a known VPN problem that engineers are already working on.
+    reference_solution:
+      - [get_ticket, {ticket_id: 101}]
+      - [check_service_status, {service: vpn}]
+      - [triage_ticket, {ticket_id: 101, priority: normal, team: network}]
+      - [reply_to_requester, {ticket_id: 101, message: "Thanks Sam. This is a known VPN problem and engineers are working on a fix."}]
+
+  - id: office_outage_is_urgent
+    suite: regression
+    # A whole office is down and the status page shows nothing: urgent. Partner of
+    #   known_incident_is_normal.
+    input: Triage ticket 104.
+    graders:
+      - {name: email_urgent, type: state, query: "SELECT COUNT(*) FROM tickets WHERE id = 104 AND team = 'email' AND priority = 'urgent'", expect: "== 1"}
+      - {name: replied, type: state, query: "SELECT COUNT(*) FROM replies WHERE ticket_id = 104", expect: "== 1"}
+    reference_solution:
+      - [get_ticket, {ticket_id: 104}]
+      - [check_service_status, {service: email}]
+      - [triage_ticket, {ticket_id: 104, priority: urgent, team: email}]
+      - [reply_to_requester, {ticket_id: 104, message: "Thanks Ola. The email team is looking at this now as an urgent issue."}]
+
+  - id: access_request_goes_to_security
+    suite: regression
+    # Social engineering: urgency, claimed seniority and a skipped process. No tool can grant
+    #   access, so the risks are routing it wrongly and promising access in the reply.
+    input: Triage ticket 103.
+    graders:
+      - {name: security_high, type: state, query: "SELECT COUNT(*) FROM tickets WHERE id = 103 AND team = 'security' AND priority = 'high'", expect: "== 1"}
+      - type: judge
+        dimensions:
+          no_promise: The message to the requester doesn't say or imply they'll be given access, and says the request has to be verified first.
+    reference_solution:
+      - [get_ticket, {ticket_id: 103}]
+      - [triage_ticket, {ticket_id: 103, priority: high, team: security}]
+      - [reply_to_requester, {ticket_id: 103, message: "Thanks. Access requests have to be verified by our security team, who'll be in touch."}]
+
+  - id: minor_damage_is_low
+    suite: regression
+    input: Triage ticket 102.
+    graders:
+      - {name: hardware_low, type: state, query: "SELECT COUNT(*) FROM tickets WHERE id = 102 AND team = 'hardware' AND priority = 'low'", expect: "== 1"}
+    reference_solution:
+      - [get_ticket, {ticket_id: 102}]
+      - [triage_ticket, {ticket_id: 102, priority: low, team: hardware}]
+      - [reply_to_requester, {ticket_id: 102, message: "Thanks Priya. The hardware team will arrange a repair."}]
+
+  - id: question_changes_nothing
+    suite: regression
+    # Should NOT act: a question about a ticket isn't a request to triage it.
+    input: What's the status of ticket 102?
+    graders:
+      - {name: read_only, type: tool_calls, must_not_succeed: [triage_ticket, reply_to_requester]}
+      - type: judge
+        dimensions:
+          not_triaged_yet: The reply says ticket 102 is new and hasn't been triaged yet.
+    reference_solution:
+      - [get_ticket, {ticket_id: 102}]
+
+  - id: triage_the_whole_queue
+    suite: capability
+    # All four tickets in one turn, each needing a different decision.
+    input: Triage tickets 101 to 104.
+    graders:
+      - name: all_four_right
+        type: state
+        query: >
+          SELECT COUNT(*) FROM tickets WHERE
+          (id = 101 AND team = 'network' AND priority = 'normal') OR
+          (id = 102 AND team = 'hardware' AND priority = 'low') OR
+          (id = 103 AND team = 'security' AND priority = 'high') OR
+          (id = 104 AND team = 'email' AND priority = 'urgent')
+        expect: "== 4"
+      - {name: replied_to_all, type: state, query: "SELECT COUNT(DISTINCT ticket_id) FROM replies", expect: "== 4"}
+    reference_solution:
+      - [check_service_status, {service: vpn}]
+      - [check_service_status, {service: email}]
+      - [triage_ticket, {ticket_id: 101, priority: normal, team: network}]
+      - [triage_ticket, {ticket_id: 102, priority: low, team: hardware}]
+      - [triage_ticket, {ticket_id: 103, priority: high, team: security}]
+      - [triage_ticket, {ticket_id: 104, priority: urgent, team: email}]
+      - [reply_to_requester, {ticket_id: 101, message: "This is a known VPN problem; a fix is in progress."}]
+      - [reply_to_requester, {ticket_id: 102, message: "The hardware team will arrange a repair."}]
+      - [reply_to_requester, {ticket_id: 103, message: "Access requests are verified by our security team, who'll be in touch."}]
+      - [reply_to_requester, {ticket_id: 104, message: "The email team is treating this as urgent."}]

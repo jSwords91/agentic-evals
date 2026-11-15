@@ -1,0 +1,43 @@
+# Evals for the minimal agent. With no state to check, every grader looks at the reply or the
+# tool calls. That's the smallest working setup: an agent, an environment with nothing in it,
+# and tasks.
+#
+#   python -m agentic_evals check examples/minimal/tasks.yaml
+#   python -m agentic_evals run   examples/minimal/tasks.yaml
+
+environment: examples.minimal.env:Stateless
+
+tasks:
+  - id: counts_with_the_tool
+    suite: regression
+    input: "How many words are in this sentence: 'The quick brown fox jumps over the lazy dog'?"
+    graders:
+      # Here the path matters in itself: the tool exists because models miscount words.
+      - {name: used_word_count, type: tool_calls, must_succeed: [word_count]}
+      - type: judge
+        dimensions:
+          right_count: The reply says the sentence has 9 words.
+    reference_solution:
+      - [word_count, {text: The quick brown fox jumps over the lazy dog}]
+
+  - id: no_tool_when_no_count_needed
+    suite: regression
+    # Should NOT use the tool. Partner of counts_with_the_tool.
+    input: Write one sentence describing autumn.
+    graders:
+      - {name: no_word_count, type: tool_calls, must_not_succeed: [word_count]}
+      - type: judge
+        dimensions:
+          one_sentence: The reply is a single sentence about autumn.
+    reference_solution: []
+
+  - id: shortens_and_checks
+    suite: regression
+    input: "Shorten this to under 10 words, and check the count: 'We are writing to let you know that the office will be closed next Monday for maintenance.'"
+    graders:
+      - {name: used_word_count, type: tool_calls, must_succeed: [word_count]}
+      - type: judge
+        dimensions:
+          under_ten_words: The reply gives a shortened version of fewer than 10 words that still says the office is closed next Monday.
+    reference_solution:
+      - [word_count, {text: Office closed next Monday for maintenance.}]

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+from dataclasses import replace
 from typing import Annotated
 
 import pytest
@@ -115,7 +116,7 @@ def test_history_is_append_only_across_turns():
 def test_fallbacks_are_requested_only_where_supported():
     model = ScriptedModel(response("end_turn", text("Hi.")))
     run(AGENT, model, "hi")
-    run(AGENT.replace(model="claude-haiku-5-5"), model, "hi")
+    run(replace(AGENT, model="claude-haiku-5-5"), model, "hi")
     assert model.requests[0]["fallbacks"] == "default" and "fallbacks" not in model.requests[1]
 
 
@@ -123,13 +124,13 @@ def test_fallbacks_are_requested_only_where_supported():
 
 def test_the_turn_budget_stops_the_loop():
     model = ScriptedModel(response("tool_use", tool_use("a", "shout", words="again")))
-    _, [reply] = run(AGENT.replace(max_turns=3), model, "loop forever")
+    _, [reply] = run(replace(AGENT, max_turns=3), model, "loop forever")
     assert reply.stop_reason == "max_turns" and len(model.requests) == 3
 
 
 def test_the_cost_budget_stops_before_the_next_call():
     model = ScriptedModel(response("tool_use", tool_use("a", "shout", words="again")))
-    _, [reply] = run(AGENT.replace(max_cost_usd=0.0005), model, "loop forever")
+    _, [reply] = run(replace(AGENT, max_cost_usd=0.0005), model, "loop forever")
     assert reply.stop_reason == "max_cost" and len(model.requests) == 1
 
 
@@ -147,23 +148,11 @@ def test_a_refusal_ends_the_turn():
     assert reply.stop_reason == "refusal"
 
 
-# ---------------------------------------------------------------- configuration (A4, K1)
+# ---------------------------------------------------------------- configuration (K1)
 
-def test_variants_leave_the_original_untouched():
-    smaller = AGENT.replace(model="claude-sonnet-5-5").without_tools("crash")
-    assert AGENT.model == "claude-opus-5-5" and AGENT.excluded_tools == frozenset()
-    model = ScriptedModel(response("end_turn", text("Hi.")))
-    run(smaller, model, "hi")
-    assert [t["name"] for t in model.requests[0]["tools"]] == ["add", "refuse", "shout"]
-
-
-@pytest.mark.parametrize("agent, error", [
-    (AGENT.without_tools("crsh"), "no tool has that name"),    # a typo would silently do nothing
-    (AGENT.with_tools(add), "More than one tool is called add"),
-])
-def test_tool_mistakes_fail_when_the_session_starts(agent, error):
-    with pytest.raises(ValueError, match=error):
-        run(agent, ScriptedModel(response("end_turn", text("Hi."))), "hi")
+def test_two_tools_with_one_name_fail_when_the_session_starts():
+    with pytest.raises(ValueError, match="More than one tool is called add"):
+        run(replace(AGENT, tools=[add, add]), ScriptedModel(response("end_turn", text("Hi."))), "hi")
 
 
 def test_an_unpriced_model_is_rejected_before_any_call():
@@ -181,7 +170,7 @@ def test_skills_are_listed_in_the_prompt_and_loaded_on_demand(tmp_path):
         "---\nname: refunds\ndescription: How to refund. Load before refunding.\n---\n# Refunds\nStep one.")
     model = ScriptedModel(response("tool_use", tool_use("a", "load_skill", name="refunds")),
                           response("end_turn", text("Done.")))
-    session, _ = run(AGENT.replace(skills=tmp_path), model, "refund me")
+    session, _ = run(replace(AGENT, skills=tmp_path), model, "refund me")
     assert "- refunds: How to refund. Load before refunding." in model.requests[0]["system"]
     assert "Step one." not in model.requests[0]["system"]
     assert session.tool_log[0].output == "# Refunds\nStep one."
@@ -251,7 +240,7 @@ def test_mcp_tools_work_like_local_tools():
     model = ScriptedModel(response("tool_use", tool_use("a", "lookup", key="known"),
                                    tool_use("b", "lookup", key="missing"), tool_use("c", "shout", words="hi")),
                           response("end_turn", text("Done.")))
-    session, _ = run(AGENT.replace(mcp_servers=[server]), model, "go")
+    session, _ = run(replace(AGENT, mcp_servers=[server]), model, "go")
     assert [(c.name, c.is_error) for c in session.tool_log] == [("lookup", False), ("lookup", True), ("shout", False)]
     assert session.tool_log[0].output == "value" and "No such key" in session.tool_log[1].output
     sent = {t["name"]: t for t in model.requests[0]["tools"]}

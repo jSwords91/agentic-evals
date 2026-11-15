@@ -181,9 +181,9 @@ def test_summaries_leave_out_infrastructure_errors_and_need_k_trials():
 
 def test_overrides_change_only_what_they_name():
     agent = Notes().agent()
-    changed = Overrides(model="claude-sonnet-5-5", no_screen=True, without_tools=("add_note",)).apply(agent)
+    changed = Overrides(model="claude-sonnet-5-5", no_screen=True).apply(agent)
     assert (changed.model, changed.effort, changed.screen) == ("claude-sonnet-5-5", agent.effort, None)
-    assert changed.excluded_tools == {"add_note"} and agent.screen is not None
+    assert agent.screen is not None  # the original is untouched
 
 
 # ---------------------------------------------------------------- the screen's eval (E12)

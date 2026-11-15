@@ -11,7 +11,7 @@ import pytest
 from mcp.server.mcpserver.exceptions import ToolError
 
 from agentic_evals.evals import load_suite
-from agentic_evals.evals.runner import Overrides, replay, run_trial
+from agentic_evals.evals.runner import Overrides, run_trial
 from agentic_evals.evals.screening import load_cases
 from examples.assistant import server
 from examples.assistant.agent import convert_time
@@ -89,14 +89,7 @@ def test_convert_time():
     assert out.startswith("2026-11-18 10:00")
 
 
-# ---------------------------------------------------------------- tasks (E7, E9, E12)
-
-@pytest.mark.parametrize("task", SUITE.tasks, ids=[t.id for t in SUITE.tasks])
-def test_reference_solution_passes_every_code_grader(task):
-    grades, calls = asyncio.run(replay(SUITE, task))
-    assert all(g.passed for g in grades), grades
-    assert not any(c.is_error for c in calls), calls
-
+# ---------------------------------------------------------------- tasks (E7, E12)
 
 def test_the_suite_has_regression_and_capability_tasks():
     suites = [t.suite for t in SUITE.tasks]

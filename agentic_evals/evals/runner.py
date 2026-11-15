@@ -38,13 +38,12 @@ class Overrides:
     model: str | None = None
     effort: str | None = None
     no_screen: bool = False
-    without_tools: tuple[str, ...] = ()
 
     def apply(self, agent: Agent) -> Agent:
         changes: dict[str, Any] = {k: v for k, v in (("model", self.model), ("effort", self.effort)) if v}
         if self.no_screen:
             changes["screen"] = None
-        return agent.replace(**changes).without_tools(*self.without_tools)
+        return dataclasses.replace(agent, **changes)
 
 
 async def run_trial(suite: Suite, task: Task, index: int, overrides: Overrides,
@@ -148,7 +147,7 @@ async def replay(suite: Suite, task: Task) -> tuple[list[Grade], list[ToolCall]]
     with tempfile.TemporaryDirectory() as tmp:
         env = suite.new_environment()
         env.setup(Path(tmp))
-        agent = env.agent().replace(screen=None)
+        agent = dataclasses.replace(env.agent(), screen=None)
         async with agent.session() as session:
             for name, args in task.reference_solution:
                 await session.call_tool(name, args)
