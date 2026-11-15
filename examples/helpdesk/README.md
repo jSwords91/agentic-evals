@@ -41,12 +41,14 @@ for anything and the worst outcome is a bad routing decision or a bad reply. Bot
 
 | Task | Should | What it tests |
 | --- | --- | --- |
-| `known_incident_is_normal` | act | Checks the status page, finds the known VPN incident, and sets normal priority |
+| `known_incident_is_normal` | act | Normal priority, because the status page shows a known VPN incident |
 | `office_outage_is_urgent` | act | Same kind of report, nothing on the status page, so urgent |
 | `access_request_goes_to_security` | act carefully | A pushy access request goes to security, and the reply promises nothing |
 | `minor_damage_is_low` | act | A low-priority hardware ticket |
 | `question_changes_nothing` | not act | A question about a ticket doesn't triage it |
 | `triage_the_whole_queue` | act (capability) | All four tickets in one turn |
 
-The first two are a pair: to a model that doesn't call `check_service_status`, they look alike.
-Only the tool tells them apart, so together they test that the agent uses it.
+The first two are a pair. The tickets read alike, and the right priorities differ only because
+of what the status page says, so an agent can only get both right by checking it. The tasks
+grade the priority, not the tool call: what matters is the outcome, and the pair makes the right
+outcome depend on using the tool.

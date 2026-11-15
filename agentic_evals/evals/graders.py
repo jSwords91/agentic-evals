@@ -3,14 +3,18 @@
 Four are built in:
 
     state       a value read from the environment's final state, compared with a target
-    tool_calls  tools that must, or must not, have been called successfully
     reply       a regular expression that must, or must not, match the final reply
     judge       an LLM grades the reply against criteria written in plain English
+    tool_calls  tools that must, or must not, have been called successfully
 
-The first three are code: fast, free, and they give the same answer every time. Use them for
-anything with a definite right answer: a row in a database, a tool that was or wasn't called, a
-number or a name in the reply. Use the judge only for meaning that code can't check, like
-whether a reply declines politely or whether a message promises something it shouldn't.
+Grade the outcome: what changed in the environment and what the reply says. Not the route the
+agent took to get there.
+
+`state` and `reply` are code: fast, free, and they give the same answer every time. Use them for
+anything with a definite right answer: a row in a database, a number or a name in the reply. Use
+the judge only for meaning that code can't check, like whether a reply declines politely or
+whether a message promises something it shouldn't. `tool_calls` is for the rare case where a
+call is itself the harm; see its docstring.
 
 To add your own type, subclass Grader and register it (see `register`). Each grader's YAML is
 validated when the tasks file loads, so a typo fails at once rather than quietly skipping a check.
@@ -138,9 +142,12 @@ class State(Grader):
 
 @register
 class ToolCalls(Grader):
-    """E3 [DE]: check the path only where it matters in itself, such as "never read the account
-    after a failed identity check". Elsewhere grade the outcome, so the agent is free to find a
-    route the task's author didn't think of."""
+    """E3 [DE]: grade the outcome, not the route. Use this only where a call is itself the harm,
+    whatever happens next: reading a customer's records after their identity check failed is a
+    privacy breach even if nothing is changed or said. Don't use it to check that the agent took
+    the steps you expected, or to stand in for an outcome you could read from the environment
+    ("nothing was sent" is a query on the outbox, not a list of tools that mustn't be called).
+    Agents often find valid routes the task's author didn't think of, and should pass when they do."""
     type: Literal["tool_calls"] = "tool_calls"
     name: str
     must_succeed: list[str] = []

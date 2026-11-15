@@ -15,7 +15,7 @@ uv run python -m agentic_evals run examples/analyst/tasks.yaml       # live
 | `warehouse.py` | The schema, a description of every table and column, and seeded data |
 | `skills/metrics/SKILL.md` | The agreed definition of each metric |
 | `agent.py` | The prompt and four tools: `list_tables`, `describe_table`, `run_sql`, `record_answer` |
-| `env.py` | A fresh warehouse per trial, and the `answer` and `reply_states_answer` graders |
+| `env.py` | A fresh warehouse and an empty answer list per trial, and three graders |
 | `tasks.yaml` | Eight questions, each with a reference query |
 
 ## What it takes to trust a number
@@ -51,10 +51,14 @@ The agent needs three kinds of knowledge, and each comes from a different place 
 
 ## How the answers are graded
 
+Every grader looks at outcomes: the recorded answer, which is what the team receives, and the
+reply. None checks which tools the agent called or in what order. An agent that finds the
+answer by a route nobody expected still passes, as it should.
+
 Correctness is graded by code. A judge is never asked whether a number is right.
 
-**`answer`** runs two queries on the trial's warehouse, the one the agent recorded and the
-task's `reference_sql`, and compares the results:
+**`answer`** compares the recorded answer, the rows the team would see, with the result of the
+task's `reference_sql` run on the same warehouse:
 
 - Column names and column order don't matter. Text is compared without case; numbers within
   `tolerance` (default 0.01, a penny).
@@ -68,6 +72,9 @@ including which orders count.
 **`reply_states_answer`** checks that the reply contains the recorded figure, at whatever
 precision the reply uses: "£4,160.10", "4160.1" and "£4,160" all match 4160.1. That's what makes
 the number a person reads the number the query produced.
+
+**`no_answer`** passes if nothing was recorded: for a question the data can't answer, no figure
+should reach the team.
 
 **The judge** is used only for meaning: whether the reply says what the figure counts, whether
 it draws the right conclusion from a comparison, whether it says the data can't answer.

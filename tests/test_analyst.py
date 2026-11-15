@@ -7,10 +7,10 @@ import asyncio
 import pytest
 
 from agentic_evals import ToolError
-from agentic_evals.agent import ToolCall
 from agentic_evals.evals import Task, Trial
 from examples.analyst import agent as analyst
-from examples.analyst.env import Answer, ReplyStatesAnswer, Warehouse
+from examples.analyst.agent import RecordedAnswer
+from examples.analyst.env import Answer, NoAnswer, ReplyStatesAnswer, Warehouse
 
 OCTOBER = "o.ordered_at >= '2026-10-01' AND o.ordered_at < '2026-11-01'"
 JOINS = ("FROM orders o JOIN customers c ON c.id = o.customer_id "
@@ -34,8 +34,10 @@ def tool(warehouse: Warehouse, name: str):
 
 
 def trial(warehouse: Warehouse, recorded_sql: str | None, reply: str = "") -> Trial:
-    log = [] if recorded_sql is None else [ToolCall("record_answer", {"sql": recorded_sql}, "Recorded.", False)]
-    return Trial(TASK, reply, log, warehouse, None)
+    """A finished trial in which the agent recorded `recorded_sql` as its answer (or nothing)."""
+    if recorded_sql is not None:
+        asyncio.run(tool(warehouse, "record_answer").run({"sql": recorded_sql}))
+    return Trial(TASK, reply, [], warehouse, None)
 
 
 def grade(grader, t: Trial):
@@ -92,6 +94,14 @@ def test_column_order_and_names_do_not_matter_but_row_order_can(warehouse):
 
 def test_no_recorded_answer_fails(warehouse):
     assert grade(Answer(name="a", reference_sql=REVENUE), trial(warehouse, None)).detail == "no answer was recorded"
+
+
+def test_recorded_answers_are_part_of_the_outcome(warehouse):
+    """What the team receives is in the environment, so graders never need the tool log."""
+    assert grade(NoAnswer(name="n"), trial(warehouse, None)).passed
+    finished = trial(warehouse, REVENUE)
+    assert warehouse.answer() == RecordedAnswer(REVENUE, ["ROUND(SUM(i.quantity * i.unit_price), 2)"], [(4160.1,)])
+    assert not grade(NoAnswer(name="n"), finished).passed
 
 
 @pytest.mark.parametrize("reply, passed", [

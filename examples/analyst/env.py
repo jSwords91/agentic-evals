@@ -1,16 +1,20 @@
-"""The eval environment for the analyst agent, and two graders written for it.
+"""The eval environment for the analyst agent, and the graders written for it.
 
-Each trial gets a fresh copy of the warehouse. The agent can't change it (its connection is
-read-only), so the copy matters less for isolation than for trust: the graders run reference
-queries on exactly the data the agent saw.
+Each trial gets a fresh copy of the warehouse, and an empty list for the answers the agent
+records. The agent can't change the warehouse (its connection is read-only), so the copy matters
+less for isolation than for trust: the graders run reference queries on exactly the data the
+agent saw.
 
-E14: the two graders here are the heart of this example's evals.
+E14: the graders here are the heart of this example's evals. All of them grade the recorded
+answer, the agent's deliverable, never which tools it called:
 
   answer               the recorded answer matches a reference query. The task stores the
                        query, not the number, so changing the seed data never means editing
                        expected values by hand, and the query documents the right answer.
   reply_states_answer  the reply gives the same figure as the recorded answer, so the number
                        a person reads is the number the query produced.
+  no_answer            nothing was recorded: for a question the data can't answer, no figure
+                       should reach the team.
 """
 
 from __future__ import annotations
@@ -18,6 +22,7 @@ from __future__ import annotations
 import re
 import sqlite3
 from contextlib import closing
+from dataclasses import asdict
 from decimal import ROUND_HALF_UP, Decimal
 from pathlib import Path
 from typing import Any, ClassVar, Literal
@@ -25,16 +30,17 @@ from typing import Any, ClassVar, Literal
 from agentic_evals import Agent
 from agentic_evals.evals import Environment, Grade, Grader, Trial, register
 
-from .agent import build_agent
+from .agent import RecordedAnswer, build_agent
 from .warehouse import create_db
 
 
 class Warehouse(Environment):
     def setup(self, workdir: Path) -> None:
         self.db = create_db(workdir / "warehouse.db")
+        self.answers: list[RecordedAnswer] = []
 
     def agent(self) -> Agent:
-        return build_agent(self.db)
+        return build_agent(self.db, self.answers)
 
     def query(self, query: str) -> Any:
         return self.rows(query)[0][0]
@@ -43,11 +49,12 @@ class Warehouse(Environment):
         with closing(sqlite3.connect(self.db)) as con:
             return con.execute(query).fetchall()
 
+    def snapshot(self) -> dict[str, Any]:
+        return {"answers": [asdict(a) for a in self.answers]}
 
-def recorded_sql(trial: Trial) -> str | None:
-    """The query from the agent's last successful record_answer call."""
-    calls = [c for c in trial.tool_log if c.name == "record_answer" and not c.is_error]
-    return calls[-1].input["sql"] if calls else None
+    def answer(self) -> RecordedAnswer | None:
+        """The latest recorded answer: the one the team would see."""
+        return self.answers[-1] if self.answers else None
 
 
 def normalise(rows: list[tuple], ordered: bool) -> list[tuple]:
@@ -85,13 +92,10 @@ class Answer(Grader):
 
     async def grade(self, trial: Trial) -> list[Grade]:
         assert isinstance(trial.env, Warehouse)
-        sql = recorded_sql(trial)
-        if sql is None:
+        answer = trial.env.answer()
+        if answer is None:
             return [Grade(self.name, False, "no answer was recorded")]
-        try:
-            got = trial.env.rows(sql)
-        except sqlite3.Error as e:
-            return [Grade(self.name, False, f"the recorded query fails: {e}")]
+        got = answer.rows
         expected = trial.env.rows(self.reference_sql)  # a broken reference is a grader bug: let it raise
         passed = same(normalise(got, self.ordered), normalise(expected, self.ordered), self.tolerance)
         return [Grade(self.name, passed, f"got {got[:5]}, expected {expected[:5]}")]
@@ -110,8 +114,8 @@ class ReplyStatesAnswer(Grader):
 
     async def grade(self, trial: Trial) -> list[Grade]:
         assert isinstance(trial.env, Warehouse)
-        sql = recorded_sql(trial)
-        rows = trial.env.rows(sql) if sql else []
+        answer = trial.env.answer()
+        rows = answer.rows if answer else []
         if len(rows) != 1 or len(rows[0]) != 1 or not isinstance(rows[0][0], int | float):
             return [Grade(self.name, False, f"the recorded answer isn't a single figure: {rows[:3]}")]
         value = Decimal(str(rows[0][0]))
@@ -121,3 +125,15 @@ class ReplyStatesAnswer(Grader):
             if value.quantize(places, rounding=ROUND_HALF_UP) == stated:
                 return [Grade(self.name, True, f"states {text}")]
         return [Grade(self.name, False, f"no number in the reply matches {value}")]
+
+
+@register
+class NoAnswer(Grader):
+    """For a question the data can't answer: no figure was recorded, so none reached the team."""
+    type: Literal["no_answer"] = "no_answer"
+    name: str
+
+    async def grade(self, trial: Trial) -> list[Grade]:
+        assert isinstance(trial.env, Warehouse)
+        answer = trial.env.answer()
+        return [Grade(self.name, answer is None, f"recorded: {answer.rows[:3]}" if answer else "")]

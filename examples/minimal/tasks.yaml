@@ -1,10 +1,14 @@
-# Evals for the minimal agent. It changes nothing, so every grader looks at the tools it used or
-# at the reply. Each grader is the cheapest one that can check its fact:
+# Evals for the minimal agent. It changes nothing, so every grader reads the reply. Each fact is
+# checked by the cheapest grader that can check it reliably:
 #
 #   the number in the reply        reply (a pattern)            code: there's one right answer
 #   the length of the reply        reply_word_limit (custom)    code: counting is exact
-#   "too long", or "keeps the      judge                        a model: these are questions of
-#   meaning"                                                    meaning, worded many ways
+#   "too long" or "fits", and      judge                        a model: these are questions of
+#   "keeps the meaning"                                         meaning, worded many ways
+#
+# No task checks whether word_count was called. That's the route, not the outcome: if the model
+# counts correctly without the tool, the user is just as well served. Whether the tool earns its
+# place shows up in the pass rate of the counting tasks.
 #
 #   python -m agentic_evals check examples/minimal/tasks.yaml
 #   python -m agentic_evals run   examples/minimal/tasks.yaml
@@ -12,19 +16,17 @@
 environment: examples.minimal.env:Stateless
 
 tasks:
-  - id: word_count_over_a_limit
+  - id: too_long_for_a_listing
     suite: regression
-    # The text is 36 words: one over the limit. The tool exists because models miscount, so
-    #   here the path matters in itself (E3) as well as the answer.
+    # 36 words: one over the limit. Partner of fits_in_a_bio.
     input: >
       Is this short enough for the event listing? The limit is 35 words. "Join us for an evening
       of live music in the old boathouse. Tickets include a drink on arrival, and food is
       available from local traders. Doors open at 7pm and the first act starts at 7:45."
     graders:
-      - {name: used_word_count, type: tool_calls, must_succeed: [word_count]}
       - {name: says_36_words, type: reply, must_match: '\b36\b'}
-      # Whether the reply says "too long" can be worded many ways, including with a negation
-      #   ("it isn't short enough") that a pattern would misread. That's meaning: a judge's job.
+      # "Too long" can be said many ways, including with a negation ("it isn't short enough")
+      #   that a pattern would misread. That's meaning: a judge's job.
       - type: judge
         dimensions:
           says_too_long: The reply says the text is too long for the 35-word limit.
@@ -32,13 +34,22 @@ tasks:
       - [word_count, {text: "Join us for an evening of live music in the old boathouse. Tickets include a drink on arrival, and food is available from local traders. Doors open at 7pm and the first act starts at 7:45."}]
     reference_reply: It's 36 words, so it's one over the 35-word limit. Dropping "old" from "old boathouse" would bring it to 35.
 
-  - id: no_count_for_a_title
+  - id: fits_in_a_bio
     suite: regression
-    # Should NOT use the tool: nothing here needs counting. Partner of word_count_over_a_limit.
-    input: Can you suggest a title for a blog post about repotting houseplants?
+    # 27 words: under the limit, so the right answer is "yes, it fits". Partner of
+    #   too_long_for_a_listing: an agent that always says "too long" fails one of the two.
+    input: >
+      Will this fit in a 30-word speaker bio? "Maya Patel leads operations at Harbour & Finch, a
+      small architecture studio in Bristol. She looks after its finances, hiring and the
+      day-to-day running of the office."
     graders:
-      - {name: no_word_count, type: tool_calls, must_not_succeed: [word_count]}
-    reference_solution: []
+      - {name: says_27_words, type: reply, must_match: '\b27\b'}
+      - type: judge
+        dimensions:
+          says_it_fits: The reply says the bio fits within the 30-word limit.
+    reference_solution:
+      - [word_count, {text: "Maya Patel leads operations at Harbour & Finch, a small architecture studio in Bristol. She looks after its finances, hiring and the day-to-day running of the office."}]
+    reference_reply: Yes, it's 27 words, so it fits with 3 to spare.
 
   - id: shortened_for_a_sign
     suite: regression
@@ -46,11 +57,9 @@ tasks:
       Can you cut this down to under 10 words for a sign on the door? Just give me the new
       wording. "Please be aware that the office will be closed next Monday for maintenance work."
     graders:
-      - {name: checked_the_count, type: tool_calls, must_succeed: [word_count]}
       - {name: under_ten_words, type: reply_word_limit, max_words: 9}
       - type: judge
         dimensions:
           keeps_the_meaning: The new wording still says the office is closed next Monday.
-    reference_solution:
-      - [word_count, {text: Office closed next Monday for maintenance.}]
+    reference_solution: []
     reference_reply: Office closed next Monday for maintenance.

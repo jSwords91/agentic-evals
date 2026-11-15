@@ -1,9 +1,8 @@
 """The eval environment for the minimal agent, and one custom grader.
 
 The agent's only tool is a pure function: it reads its input and changes nothing. So there's no
-state to create before a trial and nothing to read afterwards. Its tasks are graded on which
-tools it used (`tool_calls`) and on what the reply says (`reply`, `reply_word_limit`), and
-`query` is never needed.
+state to create before a trial and nothing to read afterwards. Its tasks are graded on what the
+reply says (`reply`, `reply_word_limit` and `judge`), and `query` is never needed.
 """
 
 from __future__ import annotations

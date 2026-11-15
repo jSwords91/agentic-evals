@@ -126,3 +126,17 @@ def test_a_whole_trial_against_the_real_server(tmp_path):
     # the plumbing, not the model.
     assert ([c["name"] for c in transcript["tool_log"]]
             == [e["tool"] for e in transcript["environment"]["audit_log"]])
+
+
+@pytest.mark.parametrize("calls, passed", [
+    ([("list_events", {"date_from": "2026-11-19", "date_to": "2026-11-19"})], True),
+    ([("respond_to_event", {"event_id": 6, "response": "declined"})], False),   # any change fails,
+    ([("create_draft", {"to": ["Sam"], "subject": "Thursday", "body": "Hi"})], False),  # whichever tool
+], ids=["read-only", "declined-a-meeting", "drafted-an-email"])
+def test_a_question_must_leave_the_workspace_unchanged(tmp_path, calls, passed):
+    """E3: graded on the outcome. Nothing lists which tools mustn't be called."""
+    task = next(t for t in SUITE.tasks if t.id == "calendar_question_changes_nothing")
+    steps = [response("tool_use", tool_use(str(i), name, **args)) for i, (name, args) in enumerate(calls)]
+    model = ScriptedModel(*steps, response("end_turn", text("The site visit, then an interview.")))
+    result = asyncio.run(run_trial(SUITE, task, 0, Overrides(no_screen=True), tmp_path, model, ScriptedModel()))
+    assert ("nothing_changed" not in result["failed"]) is passed

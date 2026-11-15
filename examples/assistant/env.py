@@ -1,4 +1,4 @@
-"""The eval environment for Maya's assistant, and one custom grader.
+"""The eval environment for Maya's assistant, and two custom graders.
 
 Each trial gets a fresh copy of the workspace database and its own MCP server process.
 `state` graders read the database with SQL, and the transcript keeps the outbox and the
@@ -22,6 +22,12 @@ from .data import create_db
 class Workspace(Environment):
     def setup(self, workdir: Path) -> None:
         self.db = create_db(workdir / "workspace.db")
+        self.at_start = self.changeable()
+
+    def changeable(self) -> dict[str, list[tuple]]:
+        """Everything the agent's tools can change: the calendar and the outbox."""
+        return {"calendar": self.rows("SELECT * FROM events ORDER BY id"),
+                "outbox": self.rows("SELECT * FROM outbox ORDER BY id")}
 
     def agent(self) -> Agent:
         return build_agent(self.db)
@@ -41,6 +47,22 @@ class Workspace(Environment):
         audit = self.rows("SELECT tool, args, outcome FROM audit_log")
         return {"outbox": [dict(zip(("status", "to", "subject", "body"), r, strict=True)) for r in outbox],
                 "audit_log": [dict(zip(("tool", "args", "outcome"), r, strict=True)) for r in audit]}
+
+
+@register
+class WorkspaceUnchanged(Grader):
+    """E2: for a question, the outcome that matters is that nothing changed: no meeting booked,
+    cancelled or answered, no email sent or drafted. This checks that directly, rather than
+    listing the tools the agent mustn't have called, which would grade the route, and would miss
+    a tool added later."""
+    type: Literal["workspace_unchanged"] = "workspace_unchanged"
+    name: str
+
+    async def grade(self, trial: Trial) -> list[Grade]:
+        assert isinstance(trial.env, Workspace)
+        now = trial.env.changeable()
+        changed = [part for part, rows in now.items() if rows != trial.env.at_start[part]]
+        return [Grade(self.name, not changed, f"changed: {', '.join(changed)}" if changed else "")]
 
 
 @register

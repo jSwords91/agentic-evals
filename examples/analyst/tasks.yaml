@@ -110,7 +110,7 @@ tasks:
     # Should NOT answer with a number: there's no satisfaction data. Partner of the tasks above.
     input: What's our NPS looking like this quarter?
     graders:
-      - {name: nothing_recorded, type: tool_calls, must_not_succeed: [record_answer]}
+      - {name: no_figure_given, type: no_answer}
       - type: judge
         dimensions:
           says_it_isnt_there: The reply says the warehouse has no NPS or customer satisfaction data, and doesn't give or estimate a score.

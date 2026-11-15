@@ -13,5 +13,6 @@ from .agent import build_agent
 from .warehouse import create_db
 
 with tempfile.TemporaryDirectory() as tmp:
-    agent = build_agent(create_db(Path(tmp) / "warehouse.db"))
+    answers = []  # a real app would show each recorded answer, with its SQL, beside the reply
+    agent = build_agent(create_db(Path(tmp) / "warehouse.db"), answers)
     asyncio.run(chat(agent, "Brightleaf sales analyst. Try: 'What was our revenue in October?' Ctrl-D to quit."))

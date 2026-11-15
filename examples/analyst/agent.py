@@ -10,8 +10,9 @@ number wrong, and puts each defence where it holds most firmly:
   - Wrong definition (counting refunds, including test accounts). The agreed definitions are a
     skill, loaded before any calculation.
   - A number the model made up, or misremembered between query and reply. The answer is
-    recorded as SQL (record_answer), and its value is computed by code from that SQL. A person
-    can rerun it, and the evals check it against a reference query.
+    recorded as SQL (record_answer), and its value is computed by code from that SQL. The
+    recorded answer is the agent's deliverable: the app shows it to the team with its SQL, so a
+    person can rerun it, and the evals grade it against a reference query.
   - Changing the data. The connection is opened read-only, so no prompt can change it (S3).
 """
 
@@ -20,6 +21,7 @@ from __future__ import annotations
 import sqlite3
 import time
 from contextlib import closing
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Literal
 
@@ -40,6 +42,13 @@ Every figure you give must come from a query you ran on the warehouse. Look at t
 When you have the answer, record the query that produces it with record_answer. Then reply in a few sentences: the figure exactly as recorded, the period it covers, and what it counts.
 
 If the data can't answer the question, say so and say what's missing. Never estimate a figure. You have read-only access to the warehouse."""
+
+
+@dataclass(frozen=True)
+class RecordedAnswer:
+    sql: str
+    columns: list[str]
+    rows: list[tuple]
 
 
 def connect(db: Path) -> sqlite3.Connection:
@@ -68,7 +77,10 @@ def table(columns: list[str], rows: list[tuple]) -> str:
     return "\n".join(lines) + more
 
 
-def build_agent(db: Path) -> Agent:
+def build_agent(db: Path, answers: list[RecordedAnswer]) -> Agent:
+    """The analyst, querying the warehouse at `db`. Recorded answers are appended to `answers`:
+    in production the app shows the latest one to the team; in an eval, the graders read it."""
+
     @tool
     def list_tables() -> str:
         """The tables in the sales warehouse, what one row of each is, and how many rows it has."""
@@ -98,6 +110,7 @@ def build_agent(db: Path) -> Agent:
         columns, rows = run(db, sql)
         if not rows or len(rows) > MAX_ROWS:
             raise ToolError(f"An answer needs between 1 and {MAX_ROWS} rows; this query returned {len(rows)}.")
+        answers.append(RecordedAnswer(sql, columns, rows))
         return "Recorded. The answer is:\n" + table(columns, rows)
 
     return Agent(system=SYSTEM, tools=[list_tables, describe_table, run_sql, record_answer],

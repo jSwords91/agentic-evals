@@ -10,7 +10,7 @@ the agent you want to evaluate. Each has its own README explaining its design.
 Requires Python 3.12+ and [uv](https://docs.astral.sh/uv/).
 
 ```bash
-uv run pytest -q                                                    # 141 offline tests, free
+uv run pytest -q                                                    # 145 offline tests, free
 uv run python -m agentic_evals check examples/analyst/tasks.yaml    # replay reference solutions, free
 
 export ANTHROPIC_API_KEY=...
@@ -271,12 +271,17 @@ quietly running fewer checks than you wrote.
 
 ### Choosing a grader
 
+**Grade the outcome, not the route.** An outcome is what the agent left behind: what changed in
+the environment, what it delivered, and what its reply says. The route is which tools it called
+and in what order. Agents often find valid routes the task's author didn't think of, and should
+pass when they do. A task that says "must call `check_service_status`" fails an agent that got
+the right answer another way, and passes one that called the tool and then ignored it.
+
 | To check that... | Use | For example |
 | --- | --- | --- |
-| Something was changed, or wasn't | `state`: a value read from the environment, compared with a target | The ticket's priority is high; no meeting was booked |
-| A tool was, or wasn't, used | `tool_calls`: `must_succeed`, `must_not_succeed` | The agent counted with `word_count`; nothing was recorded |
+| Something was changed, or wasn't | `state`: a value read from the environment, compared with a target | The ticket's priority is high; nothing was sent |
 | The reply contains a fact with a fixed form | `reply`: a regular expression, `must_match` or `must_not_match` | "10am"; a person's name; "36" |
-| Anything else code can decide | A custom grader (see [Add a grader type](#add-a-grader-type)) | A recorded SQL answer matches a reference query; a reply is under 10 words |
+| Anything else code can decide | A custom grader (see [Add a grader type](#add-a-grader-type)) | The recorded answer matches a reference query; the calendar is unchanged; the reply is under 10 words |
 | The reply means something: declines, warns, draws the right conclusion | `judge`: criteria in plain English, one model call each | "The reply says it can't delete data" |
 
 **If a check can be written as code, write it as code.** Code graders are free, instant, and give
@@ -291,8 +296,18 @@ on the website", not "the reply draws the right conclusion". The judge sees the 
 tool call with its arguments, and the final reply, so it can grade a message the agent sent
 through a tool.
 
-Grade the outcome wherever you can. Use `tool_calls` only where the path matters in itself, such
-as "a question changes nothing" or "the tool that exists because models miscount was used".
+There's a fifth grader, `tool_calls`, for the rare case where a call is itself the harm, whatever
+happens next: reading a customer's records after their identity check failed is a privacy breach
+even if nothing is changed or said. None of the examples needs it. "A question changes nothing"
+is an outcome, so it's checked on the environment, not by listing tools that mustn't be called.
+
+Two things that look like route checks aren't needed at all:
+
+- **Whether a helpful tool was used.** If it helps, the outcome shows it: the agent gets more
+  answers right. The helpdesk's status page is tested by a pair of tickets whose right
+  priorities differ only because of what the status page says.
+- **Unnecessary steps.** Extra tool calls cost time and money, and the report shows model calls,
+  seconds and cost for every task. They're a cost to watch, not a failure.
 
 ### Running
 
@@ -419,16 +434,18 @@ Say the helpdesk agent gets a new tool, `assign_to_person(ticket_id, email)`.
    environment pass a fake.
 2. **Make its effect readable.** If the tool changes something, make sure `query` can see the
    change. Here that's an `assignee` column in the tickets table.
-3. **Add at least two tasks.** One where the tool should be used, graded on the outcome
-   (`SELECT COUNT(*) FROM tickets WHERE id = 105 AND assignee = '...'`). One where it shouldn't,
-   graded with `tool_calls: must_not_succeed: [assign_to_person]` or a `state` check that
-   nothing changed.
+3. **Add at least two tasks, graded on the outcome.** One where the ticket should end up
+   assigned (`SELECT COUNT(*) FROM tickets WHERE id = 105 AND assignee = '...'`), and one where
+   it shouldn't (`... AND assignee IS NULL`). Don't grade whether `assign_to_person` was called:
+   the assignment is what matters.
 4. **Run the whole suite**, not just the new tasks. A new tool changes the choices the model
    has, and so can change how it handles the old tasks.
 
-The helpdesk's status page is a worked example. `known_incident_is_normal` and
-`office_outage_is_urgent` look alike to a model that doesn't call `check_service_status`. Only
-the tool tells them apart.
+If the new tool only reads (a lookup, a status check), it changes nothing you can query. Test it
+with tasks whose right outcome depends on what it returns. The helpdesk's status page is the
+worked example: `known_incident_is_normal` and `office_outage_is_urgent` are tickets that read
+alike, and the right priorities differ only because of what the status page says. Both tasks
+grade the priority. Neither checks the tool call.
 
 ### Add a grader type
 
@@ -473,7 +490,7 @@ use it in the tasks file as `type: reply_word_limit`. The examples have three mo
 | `agentic_evals/__main__.py` | The command line |
 | `examples/analyst/` | Trustworthy numbers: schema from tools, definitions in a skill, answers graded against reference queries |
 | `examples/assistant/` | MCP, skills, the screen, rules in code, and safety tasks |
-| `tests/` | 141 offline tests |
+| `tests/` | 145 offline tests |
 | `.github/workflows/evals.yml` | Lint, tests and every example's reference solutions on each PR; the gated regression suites when a key is set; capability nightly |
 
 ## Design notes
@@ -550,7 +567,7 @@ grep -rn "\[DE\]" --include=*.py --include=*.yaml .
 | --- | --- |
 | E1 | Shared vocabulary: task, trial, transcript, outcome, grader, harness |
 | E2 | `state` graders check the outcome, which the agent can't fake |
-| E3 | `tool_calls` graders only where the path matters in itself |
+| E3 | Grade the outcome, not the route: no example checks which tools were called |
 | E4 | The judge for meaning only: one call per criterion, UNKNOWN allowed, structured output |
 | E5 | pass@k and pass^k; the gate uses pass^k |
 | E6 | Regression and capability suites; capability tasks graduate |

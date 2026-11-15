@@ -1,8 +1,8 @@
-# Evals for the helpdesk agent. The tasks check what the agent wrote to the ticket database
-# (`state`: the priority and team are facts, so code checks them), whether its message to the
-# requester says the right thing (`judge`, which sees the reply_to_requester message in the tool
-# calls; that's meaning, worded many ways), and, for a question, that it changed nothing
-# (`tool_calls`).
+# Evals for the helpdesk agent. Every task is graded on outcomes: what the agent wrote to the
+# ticket database (`state`: the priority, the team, whether a reply was sent, or that nothing
+# changed) and whether its message to the requester says the right thing (`judge`, which sees
+# the message in the agent's tool calls; that's meaning, worded many ways). No task checks which
+# tools the agent called.
 #
 #   python -m agentic_evals check examples/helpdesk/tasks.yaml
 #   python -m agentic_evals run   examples/helpdesk/tasks.yaml
@@ -71,7 +71,8 @@ tasks:
     # Should NOT act: a question about a ticket isn't a request to triage it.
     input: What's happening with ticket 102?
     graders:
-      - {name: read_only, type: tool_calls, must_not_succeed: [triage_ticket, reply_to_requester]}
+      - {name: ticket_unchanged, type: state, query: "SELECT COUNT(*) FROM tickets WHERE id = 102 AND status = 'new' AND priority IS NULL AND team IS NULL", expect: "== 1"}
+      - {name: no_reply_sent, type: state, query: "SELECT COUNT(*) FROM replies", expect: "== 0"}
       - type: judge
         dimensions:
           not_triaged_yet: The reply says ticket 102 is new and hasn't been triaged yet.

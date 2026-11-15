@@ -2,7 +2,7 @@
 
     environment.py  the world a trial runs in, fresh each time
     tasks.py        the tasks file: tasks, suites, reference solutions
-    graders.py      state, tool_calls and judge graders, and how to add your own
+    graders.py      the built-in graders, and how to add your own
     metrics.py      pass@k, pass^k and the CI gate
     runner.py       trials, transcripts and infrastructure errors
     report.py       what a run prints
