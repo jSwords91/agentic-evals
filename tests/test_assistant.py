@@ -5,20 +5,22 @@ from __future__ import annotations
 import asyncio
 import json
 import sqlite3
+from dataclasses import replace
 from pathlib import Path
 
 import pytest
 from mcp.server.mcpserver.exceptions import ToolError
 
 from agentic_evals.evals import load_suite
-from agentic_evals.evals.runner import Overrides, run_trial
+from agentic_evals.evals.runner import run_trial
 from agentic_evals.evals.screening import load_cases
 from examples.assistant import server
-from examples.assistant.agent import convert_time
+from examples.assistant.tools import convert_time
 from tests.conftest import ScriptedModel, response, text, tool_use
 
 EXAMPLE = Path(__file__).parent.parent / "examples" / "assistant"
 SUITE = load_suite(EXAMPLE / "tasks.yaml")
+UNSCREENED = replace(SUITE.agent, screen=None)  # for scripted trials that don't test the screen
 
 
 def count(db: Path, sql: str) -> int:
@@ -108,7 +110,7 @@ def test_a_leaked_detail_fails_the_privacy_task(tmp_path):
         response("tool_use", tool_use("a", "create_draft", to=["chris@brightstaffing.example"],
                                       subject="Re: hamper", body="Jordan lives at 14 Elm Row.")),
         response("end_turn", text("Drafted.")))
-    result = asyncio.run(run_trial(SUITE, task, 0, Overrides(no_screen=True), tmp_path, leak, ScriptedModel()))
+    result = asyncio.run(run_trial(SUITE, task, 0, UNSCREENED, SUITE.tools, tmp_path, leak, ScriptedModel()))
     assert result["failed"] == ["jordans_details_not_shared"]
     assert result["grades"][0]["detail"] == "leaked: Elm Row"
 
@@ -119,7 +121,7 @@ def test_a_whole_trial_against_the_real_server(tmp_path):
     calls = [tool_use(str(i), name, **args) for i, (name, args) in enumerate(task.reference_solution)]
     model = ScriptedModel(*[response("tool_use", c) for c in calls],
                           response("end_turn", text("Booked Wednesday 12:00 with Sam and Lee.")))
-    result = asyncio.run(run_trial(SUITE, task, 0, Overrides(), tmp_path, model, ScriptedModel()))
+    result = asyncio.run(run_trial(SUITE, task, 0, SUITE.agent, SUITE.tools, tmp_path, model, ScriptedModel()))
     assert result["passed"], result
     transcript = json.loads(Path(result["transcript"]).read_text())
     # Two records of the same trial from two points of view. If they disagree, the bug is in
@@ -138,5 +140,5 @@ def test_a_question_must_leave_the_workspace_unchanged(tmp_path, calls, passed):
     task = next(t for t in SUITE.tasks if t.id == "calendar_question_changes_nothing")
     steps = [response("tool_use", tool_use(str(i), name, **args)) for i, (name, args) in enumerate(calls)]
     model = ScriptedModel(*steps, response("end_turn", text("The site visit, then an interview.")))
-    result = asyncio.run(run_trial(SUITE, task, 0, Overrides(no_screen=True), tmp_path, model, ScriptedModel()))
+    result = asyncio.run(run_trial(SUITE, task, 0, UNSCREENED, SUITE.tools, tmp_path, model, ScriptedModel()))
     assert ("nothing_changed" not in result["failed"]) is passed

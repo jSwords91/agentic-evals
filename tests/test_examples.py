@@ -8,8 +8,8 @@ from pathlib import Path
 import pytest
 
 from agentic_evals.evals import load_suite
-from agentic_evals.evals.runner import Overrides, replay, run_trial
-from examples.helpdesk.env import Helpdesk
+from agentic_evals.evals.runner import replay, run_trial
+from examples.helpdesk.env import Helpdesk, tools
 from tests.conftest import ScriptedModel, response, text, tool_use
 
 EXAMPLES = Path(__file__).parent.parent / "examples"
@@ -44,7 +44,7 @@ def helpdesk_trial(tmp_path: Path, task_id: str, *steps) -> dict:
     task = next(t for t in suite.tasks if t.id == task_id)
     calls = [response("tool_use", tool_use(str(i), name, **args)) for i, (name, args) in enumerate(steps)]
     model = ScriptedModel(*calls, response("end_turn", text("Done.")))
-    return asyncio.run(run_trial(suite, task, 0, Overrides(), tmp_path, model, ScriptedModel()))
+    return asyncio.run(run_trial(suite, task, 0, suite.agent, suite.tools, tmp_path, model, ScriptedModel()))
 
 
 def test_a_correct_triage_passes(tmp_path):
@@ -64,7 +64,7 @@ def test_each_trial_gets_its_own_database(tmp_path):
     for env, folder in ((first, tmp_path / "a"), (second, tmp_path / "b")):
         folder.mkdir()
         env.setup(folder)
-    triage = next(t for t in first.agent().tools if t.name == "triage_ticket")
+    triage = next(t for t in tools(first) if t.name == "triage_ticket")
     asyncio.run(triage.run({"ticket_id": 102, "priority": "low", "team": "hardware"}))
     assert first.query("SELECT COUNT(*) FROM tickets WHERE status = 'triaged'") == 1
     assert second.query("SELECT COUNT(*) FROM tickets WHERE status = 'triaged'") == 0

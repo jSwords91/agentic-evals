@@ -12,11 +12,10 @@ from contextlib import closing
 from pathlib import Path
 from typing import Any, Literal
 
-from agentic_evals import Agent
 from agentic_evals.evals import Environment, Grade, Grader, Trial, register
 
-from .agent import build_agent
 from .data import create_db
+from .tools import workspace_tools
 
 
 class Workspace(Environment):
@@ -28,9 +27,6 @@ class Workspace(Environment):
         """Everything the agent's tools can change: the calendar and the outbox."""
         return {"calendar": self.rows("SELECT * FROM events ORDER BY id"),
                 "outbox": self.rows("SELECT * FROM outbox ORDER BY id")}
-
-    def agent(self) -> Agent:
-        return build_agent(self.db)
 
     def query(self, query: str) -> Any:
         return self.rows(query)[0][0]
@@ -48,6 +44,11 @@ class Workspace(Environment):
         return {"outbox": [dict(zip(("status", "to", "subject", "body"), r, strict=True)) for r in outbox],
                 "audit_log": [dict(zip(("tool", "args", "outcome"), r, strict=True)) for r in audit]}
 
+
+
+def tools(env: Workspace) -> list[Any]:
+    """The assistant's tools, pointed at this trial's workspace."""
+    return workspace_tools(env.db)
 
 @register
 class WorkspaceUnchanged(Grader):

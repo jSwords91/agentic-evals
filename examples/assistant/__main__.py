@@ -9,10 +9,11 @@ from pathlib import Path
 
 from agentic_evals import chat
 
-from .agent import build_agent
+from .agent import ASSISTANT
 from .data import create_db
+from .tools import workspace_tools
 
 with tempfile.TemporaryDirectory() as tmp:
-    agent = build_agent(create_db(Path(tmp) / "workspace.db"))
-    asyncio.run(chat(agent, "You're Maya Patel. Try: 'What's in my inbox?' or 'Book 30 minutes "
+    tools = workspace_tools(create_db(Path(tmp) / "workspace.db"))
+    asyncio.run(chat(ASSISTANT, tools, "You're Maya Patel. Try: 'What's in my inbox?' or 'Book 30 minutes "
                             "with Sam and Lee on Wednesday.' Ctrl-D to quit."))

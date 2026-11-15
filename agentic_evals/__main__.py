@@ -4,24 +4,23 @@
     python -m agentic_evals run    TASKS [options]       run the evals
     python -m agentic_evals screen CASES [options]       the injection screen's component eval
 
-Run it from your project's root, so the environment named in the tasks file can be imported.
+Run it from your project's root, so the names in the tasks file can be imported.
 """
 
 from __future__ import annotations
 
 import argparse
 import asyncio
-import json
+import dataclasses
 import sys
 from pathlib import Path
 
 import anthropic
 
-from .evals import load_suite
-from .evals.metrics import regression_gate
-from .evals.report import print_comparison, print_failures, print_table
-from .evals.runner import Overrides, replay, run_suite, summarise
+from .evals import evaluate, load_suite
+from .evals.runner import replay
 from .evals.screening import load_cases, print_report, run_cases, score
+from .evals.tasks import import_object
 from .screen import Screen
 
 
@@ -52,37 +51,46 @@ async def preflight() -> None:
         raise SystemExit(f"Can't call the Claude API: {e}\nSet ANTHROPIC_API_KEY and try again.") from None
 
 
+def named(target: str) -> object:
+    """An --agent or --tools argument, with a plain message if it can't be imported."""
+    try:
+        return import_object(target)
+    except (ImportError, AttributeError, ValueError) as e:
+        raise SystemExit(f"Can't import {target}: {e}") from None
+
+
 async def run(args: argparse.Namespace) -> int:
     suite = load_suite(args.tasks)
-    k = args.k or args.trials
-    if unknown := sorted(set(args.task) - {t.id for t in suite.tasks}):
-        raise SystemExit(f"No task called {', '.join(unknown)} in {args.tasks}.")
-    tasks = [t for t in suite.tasks
-             if args.suite in ("all", t.suite) and (not args.task or t.id in args.task)]
-    overrides = Overrides(model=args.model, effort=args.effort, no_screen=args.no_screen)
+    agent = named(args.agent) if args.agent else suite.agent
+    if agent is None:
+        raise SystemExit(f"{args.tasks} names no agent: pass --agent package.module:NAME.")
+    # K1: the experiments you'll actually run are a different model, effort or screen, on the
+    #   same agent. Each is a new Agent; the original is unchanged.
+    changes = {key: value for key, value in (("model", args.model), ("effort", args.effort)) if value}
+    if args.no_screen:
+        changes["screen"] = None
+    agent = dataclasses.replace(agent, **changes)
+    tools = named(args.tools) if args.tools else None
     await preflight()
-    trials = await run_suite(suite, tasks, args.trials, overrides, args.results, args.concurrency)
-    summary = summarise(tasks, trials, k)
+    try:
+        results = await evaluate(suite, agent=agent, tools=tools, trials=args.trials, k=args.k,
+                                 include=args.suite, task_ids=args.task, results_dir=args.results,
+                                 concurrency=args.concurrency)
+    except ValueError as e:  # an unknown --task, say
+        raise SystemExit(str(e)) from None
 
-    changed = {key: value for key, value in vars(overrides).items() if value}
-    print(f"{args.tasks}: {len(tasks)} tasks x {args.trials} trials, k={k}, "
-          f"overrides: {changed or 'none'}")
-    print_table(summary, k)
+    results.table()
     if args.compare:
-        print_comparison(summary, json.loads(args.compare.read_text())["tasks"])
-    print_failures(trials)
-    args.results.mkdir(parents=True, exist_ok=True)
-    out = args.results / "latest.json"
-    out.write_text(json.dumps({"overrides": vars(overrides), "k": k, "tasks": summary,
-                               "trials": trials}, indent=2, default=str))
+        results.compare(args.compare)
+    results.failures()
+    out = results.save(args.results / "latest.json")
     print(f"\nWrote {out} and transcripts in {args.results / 'transcripts'}")
 
     if args.gate is None:
         return 0
-    mean, passed = regression_gate(
-        [r["pass_hat_k"] for r in summary.values() if r["suite"] == "regression"], args.gate)
+    mean, passed = results.gate(args.gate)
     print("Regression gate: FAIL, no regression tasks ran" if mean is None
-          else f"Regression gate: mean pass^{k} {mean:.2f} (need {args.gate}): "
+          else f"Regression gate: mean pass^{results.k} {mean:.2f} (need {args.gate}): "
                + ("PASS" if passed else "FAIL"))
     return 0 if passed else 1
 
@@ -108,6 +116,8 @@ def main() -> int:
     p.add_argument("--task", action="append", default=[], help="run only this task id (repeatable)")
     p.add_argument("--trials", type=int, default=3, help="trials per task (n)")
     p.add_argument("--k", type=int, help="k for pass@k and pass^k (default: --trials)")
+    p.add_argument("--agent", metavar="MODULE:NAME", help="the agent to test (default: the tasks file's)")
+    p.add_argument("--tools", metavar="MODULE:NAME", help="the tools to give it (default: the tasks file's)")
     p.add_argument("--model", help="override the agent's model")
     p.add_argument("--effort", help="override the agent's effort")
     p.add_argument("--no-screen", action="store_true", help="turn off the injection screen")

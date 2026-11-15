@@ -42,12 +42,13 @@ def crash() -> str:
     raise KeyError("oops")
 
 
-AGENT = Agent(system="You are a test agent.", tools=[shout, add, refuse, crash])
+AGENT = Agent(system="You are a test agent.")   # the brain
+TOOLS = [shout, add, refuse, crash]              # the hands
 
 
-def run(agent: Agent, model: ScriptedModel, *messages: str):
+def run(agent: Agent, model: ScriptedModel, *messages: str, tools=TOOLS):
     async def go():
-        async with agent.session(model) as session:
+        async with agent.session(tools, model) as session:
             replies = [await session.send(m) for m in messages]
         return session, replies
     return asyncio.run(go())
@@ -153,7 +154,7 @@ def test_a_refusal_ends_the_turn():
 
 def test_two_tools_with_one_name_fail_when_the_session_starts():
     with pytest.raises(ValueError, match="More than one tool is called add"):
-        run(replace(AGENT, tools=[add, add]), ScriptedModel(response("end_turn", text("Hi."))), "hi")
+        run(AGENT, ScriptedModel(response("end_turn", text("Hi."))), "hi", tools=[add, add])
 
 
 def test_an_unpriced_model_is_rejected_before_any_call():
@@ -195,8 +196,7 @@ def flag_wire(request: dict) -> ScreenVerdict:
 def screened(parse) -> tuple:
     model = ScriptedModel(response("tool_use", tool_use("a", "read_note"), tool_use("b", "read_note")),
                           response("end_turn", text("Done.")), parse=parse)
-    agent = Agent(system="x", tools=[read_note], screen=Screen())
-    session, _ = run(agent, model, "read it")
+    session, _ = run(Agent(system="x", screen=Screen()), model, "read it", tools=[read_note])
     return session, model
 
 
@@ -241,7 +241,7 @@ def test_mcp_tools_work_like_local_tools():
     model = ScriptedModel(response("tool_use", tool_use("a", "lookup", key="known"),
                                    tool_use("b", "lookup", key="missing"), tool_use("c", "shout", words="hi")),
                           response("end_turn", text("Done.")))
-    session, _ = run(replace(AGENT, mcp_servers=[server]), model, "go")
+    session, _ = run(AGENT, model, "go", tools=[*TOOLS, server])  # local tools and an MCP server, in one list
     assert [(c.name, c.is_error) for c in session.tool_log] == [("lookup", False), ("lookup", True), ("shout", False)]
     assert session.tool_log[0].output == "value" and "No such key" in session.tool_log[1].output
     sent = {t["name"]: t for t in model.requests[0]["tools"]}

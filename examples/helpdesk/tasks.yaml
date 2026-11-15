@@ -8,6 +8,8 @@
 #   python -m agentic_evals run   examples/helpdesk/tasks.yaml
 
 environment: examples.helpdesk.env:Helpdesk
+agent: examples.helpdesk.agent:HELPDESK
+tools: examples.helpdesk.env:tools
 
 tasks:
   - id: known_incident_is_normal

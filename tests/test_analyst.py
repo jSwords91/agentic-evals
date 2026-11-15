@@ -8,9 +8,9 @@ import pytest
 
 from agentic_evals import ToolError
 from agentic_evals.evals import Task, Trial
-from examples.analyst import agent as analyst
-from examples.analyst.agent import RecordedAnswer
-from examples.analyst.env import Answer, NoAnswer, ReplyStatesAnswer, Warehouse
+from examples.analyst import tools as analyst
+from examples.analyst.env import Answer, NoAnswer, ReplyStatesAnswer, Warehouse, tools
+from examples.analyst.tools import RecordedAnswer
 
 OCTOBER = "o.ordered_at >= '2026-10-01' AND o.ordered_at < '2026-11-01'"
 JOINS = ("FROM orders o JOIN customers c ON c.id = o.customer_id "
@@ -30,7 +30,7 @@ def warehouse(tmp_path) -> Warehouse:
 
 
 def tool(warehouse: Warehouse, name: str):
-    return next(t for t in warehouse.agent().tools if t.name == name)
+    return next(t for t in tools(warehouse) if t.name == name)
 
 
 def trial(warehouse: Warehouse, recorded_sql: str | None, reply: str = "") -> Trial:

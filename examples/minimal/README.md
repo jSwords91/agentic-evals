@@ -10,8 +10,9 @@ uv run python -m agentic_evals run examples/minimal/tasks.yaml       # live
 
 | File | What it is |
 | --- | --- |
-| `agent.py` | The tool and the agent: about ten lines |
-| `env.py` | An environment with nothing in it, and a `reply_word_limit` grader |
+| `agent.py` | The brain: `WRITER`, a one-line prompt |
+| `tools.py` | The hands: `word_count`, a pure function |
+| `env.py` | The world: nothing in it. `tools(env)`, and a `reply_word_limit` grader |
 | `tasks.yaml` | Three tasks |
 
 The tool is a pure function, so there's nothing to set up before a trial and nothing to read

@@ -14,8 +14,9 @@ uv run python -m agentic_evals run examples/analyst/tasks.yaml       # live
 | --- | --- |
 | `warehouse.py` | The schema, a description of every table and column, and seeded data |
 | `skills/calculating-metrics/SKILL.md` | The agreed definition of each metric |
-| `agent.py` | The prompt and four tools: `list_tables`, `describe_table`, `run_sql`, `record_answer` |
-| `env.py` | A fresh warehouse and an empty answer list per trial, and three graders |
+| `agent.py` | The brain: `ANALYST`, the prompt and the metric definitions skill |
+| `tools.py` | The hands: `warehouse_tools(db, answers)` builds `list_tables`, `describe_table`, `run_sql` and `record_answer` |
+| `env.py` | The world: a fresh warehouse and an empty answer list per trial, `tools(env)`, and three graders |
 | `tasks.yaml` | Eight questions, each with a reference query |
 
 ## What it takes to trust a number

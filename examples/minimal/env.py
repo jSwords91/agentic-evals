@@ -10,18 +10,19 @@ from __future__ import annotations
 from pathlib import Path
 from typing import ClassVar, Literal
 
-from agentic_evals import Agent
+from agentic_evals import Tool
 from agentic_evals.evals import Environment, Grade, Grader, Trial, register
 
-from .agent import AGENT
+from .tools import TOOLS
 
 
 class Stateless(Environment):
     def setup(self, workdir: Path) -> None:
         pass  # nothing to create
 
-    def agent(self) -> Agent:
-        return AGENT
+
+def tools(env: Stateless) -> list[Tool]:
+    return TOOLS  # pure functions: the same in every trial and in production
 
 
 @register

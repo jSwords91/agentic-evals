@@ -1,22 +1,22 @@
-"""The agent: one model, one loop, any tools.
+"""The agent loop: a brain, the hands it's given, and a session that joins them.
 
-    agent = Agent(system="You help with ...", tools=[convert_time],
-                  mcp_servers=[stdio("python", "-m", "my_server")])
-    async with agent.session() as session:
+    agent = Agent(system="You help with ...")                     # the brain
+    tools = [convert_time, stdio("python", "-m", "my_server")]    # the hands
+    async with agent.session(tools) as session:                    # one conversation
         reply = await session.send("What's on Thursday?")
 
-`Agent` is a definition: the prompt, the model, the tools and the limits. Its tools are the list
-you pass in; to change them, change the list. It's immutable, so one definition can be shared and
-run many times.
-
-`Session` is one conversation with an agent. It owns the MCP connections, the message history,
-the record of tool calls and the bill. Every eval trial gets a fresh one.
-
+A4 [MA]: three parts with simple interfaces between them, so any one can change without the
+  others:
+  - `Agent`, the brain: the prompt, the model, the limits, the skills and the screen. It holds
+    no tools and no resources, so it's a plain constant you can share, compare and swap.
+  - The tools, the hands: `@tool` functions and MCP servers. A tool that needs a database or a
+    client gets it from whoever builds the list, so the same brain can work on production in
+    one place and on a test copy in an eval.
+  - `Session`: one conversation joining a brain to a set of hands. It owns the MCP connections,
+    the message history, the record of tool calls and the bill.
 A3 [BEA][HD]: the simplest design that works. One model, one context window, tools in a loop.
   No router, planner or subagents. Every extra component encodes an assumption about what the
   model can't do. Add one when an eval shows the need, and keep the eval that justified it.
-A4 [MA]: the brain (model and prompt), the hands (tools and MCP servers) and the session
-  (history and logs) are separate, so any one can change without the others.
 """
 
 from __future__ import annotations
@@ -45,8 +45,6 @@ FALLBACK_BETA = "server-side-fallback-2026-07-01"
 @dataclass(frozen=True)
 class Agent:
     system: str
-    tools: Sequence[Tool] = ()
-    mcp_servers: Sequence[Any] = ()      # anything mcp.Client accepts; see mcp.py
     skills: str | Path | None = None     # a folder of */SKILL.md files; see skills.py
     screen: Screen | None = None         # the injection screen; see screen.py
     # K1 [docs]: model and effort are configuration, so trying another model is a flag on an
@@ -63,14 +61,13 @@ class Agent:
     thinking_display: str = "summarized"
 
     def __post_init__(self) -> None:
-        object.__setattr__(self, "tools", tuple(self.tools))
-        object.__setattr__(self, "mcp_servers", tuple(self.mcp_servers))
         check_priced(self.model)
         if self.screen:
             check_priced(self.screen.model)
 
-    def session(self, client: anthropic.AsyncAnthropic | None = None) -> Session:
-        return Session(self, client)
+    def session(self, tools: Sequence[Any] = (), client: anthropic.AsyncAnthropic | None = None) -> Session:
+        """A conversation with this agent, using `tools`: each a `Tool`, or an MCP server (see mcp.py)."""
+        return Session(self, tools, client)
 
 
 @dataclass(frozen=True)
@@ -94,10 +91,11 @@ class Reply:
 
 
 class Session:
-    """One conversation with an agent. Use as `async with agent.session() as session:`."""
+    """One conversation joining an agent to its tools. Use as `async with agent.session(tools) as session:`."""
 
-    def __init__(self, agent: Agent, client: anthropic.AsyncAnthropic | None = None):
+    def __init__(self, agent: Agent, tools: Sequence[Any] = (), client: anthropic.AsyncAnthropic | None = None):
         self.agent = agent
+        self.hands = tuple(tools)
         self.client = client or anthropic.AsyncAnthropic()
         self.system = agent.system
         self.tools: dict[str, Tool] = {}
@@ -111,9 +109,9 @@ class Session:
 
     async def __aenter__(self) -> Session:
         async with AsyncExitStack() as stack:  # if setup fails, connections opened so far close
-            tools = list(self.agent.tools)
-            for server in self.agent.mcp_servers:
-                tools += await connect(server, stack)
+            tools: list[Tool] = []
+            for hand in self.hands:  # a local tool, or an MCP server that provides tools
+                tools += [hand] if isinstance(hand, Tool) else await connect(hand, stack)
             if self.agent.skills is not None:
                 skills = load_skills(self.agent.skills)
                 tools.append(load_skill_tool(skills))

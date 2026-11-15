@@ -15,6 +15,7 @@ dependencies = [
 
 [dependency-groups]
 dev = ["pytest>=9.2.0"]
+notebook = ["jupyterlab>=4.4"]   # uv run --group notebook jupyter lab
 
 [build-system]
 requires = ["hatchling"]
@@ -42,4 +43,5 @@ select = ["E", "F", "W", "I", "B", "UP", "SIM"]
 "examples/assistant/agent.py" = ["E501"]
 "examples/helpdesk/agent.py" = ["E501"]
 "examples/analyst/agent.py" = ["E501"]
+"notebooks/*.ipynb" = ["E501"]
 "examples/assistant/data.py" = ["E501"]

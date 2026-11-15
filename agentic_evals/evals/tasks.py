@@ -1,19 +1,25 @@
-"""Tasks: one input, the graders that decide pass or fail, and a reference solution.
+"""Tasks and suites.
 
-A tasks file names the environment the tasks run in, then lists the tasks:
+A task is one input, the graders that decide pass or fail, and a reference solution. A suite is
+a set of tasks, the environment they run in, and, optionally, the agent and tools to test by
+default. A tasks file is a suite written in YAML:
 
-    environment: examples.assistant.env:Workspace
+    environment: examples.analyst.env:Warehouse      # the world each trial runs in
+    agent: examples.analyst.agent:ANALYST            # the default agent under test (the brain)
+    tools: examples.analyst.env:tools                # the default tools (the hands)
     tasks:
-      - id: question_changes_nothing
+      - id: revenue_for_a_month
         suite: regression
-        input: What's on my calendar on Thursday?
+        input: What was our revenue in October?
         graders:
-          - {type: state, name: no_events_added, query: "SELECT COUNT(*) FROM events", expect: "== 9"}
-          - type: judge
-            dimensions:
-              mentions_site_visit: The reply mentions the site visit at 10:00.
+          - {type: answer, name: right_figure, reference_sql: "SELECT ..."}
         reference_solution:
-          - [list_events, {date_from: "2026-11-19", date_to: "2026-11-19"}]
+          - [record_answer, {sql: "SELECT ..."}]
+
+The same suite can be built in code, and run against any agent and tools:
+
+    suite = Suite(environment=Warehouse, tasks=[{"id": ..., "suite": ..., ...}])
+    results = await evaluate(suite, agent=ANALYST, tools=tools)
 
 E1 [DE]: the vocabulary used throughout:
   task        one input plus its graders and reference solution
@@ -34,13 +40,16 @@ E9 [DE]: a reference solution is a list of tool calls that passes every code gra
 from __future__ import annotations
 
 import importlib
+from collections.abc import Sequence
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Literal
 
 import yaml
-from pydantic import BaseModel, ConfigDict, Field, PrivateAttr, field_validator, model_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 
-from .environment import Environment
+from ..agent import Agent
+from .environment import Environment, ToolFactory
 from .graders import Grader, parse_grader
 
 
@@ -59,38 +68,51 @@ class Task(BaseModel):
         return [parse_grader(s) for s in specs] if isinstance(specs, list) else specs
 
 
-class Suite(BaseModel):
-    model_config = ConfigDict(extra="forbid")
-    environment: str  # "module:ClassName", importable from the working directory
-    tasks: list[Task] = Field(min_length=1)
-    _environment_class: type[Environment] = PrivateAttr()
+@dataclass(frozen=True)
+class Suite:
+    environment: type[Environment]
+    tasks: Sequence[Task] = field(default_factory=tuple)
+    agent: Agent | None = None          # the default agent under test
+    tools: ToolFactory | None = None    # the default tools, given a trial's environment
 
-    @model_validator(mode="after")
-    def _unique_ids(self) -> Suite:
-        ids = [t.id for t in self.tasks]
+    def __post_init__(self) -> None:
+        tasks = tuple(t if isinstance(t, Task) else Task.model_validate(t) for t in self.tasks)
+        object.__setattr__(self, "tasks", tasks)
+        if not tasks:
+            raise ValueError("A suite needs at least one task.")
+        ids = [t.id for t in tasks]
         if duplicates := sorted({i for i in ids if ids.count(i) > 1}):
             raise ValueError(f"duplicate task ids: {', '.join(duplicates)}")
-        return self
+        if not (isinstance(self.environment, type) and issubclass(self.environment, Environment)):
+            raise ValueError(f"{self.environment!r} is not an Environment subclass")
 
-    def new_environment(self) -> Environment:
-        return self._environment_class()
+    def task(self, task_id: str) -> Task:
+        return next(t for t in self.tasks if t.id == task_id)
+
+
+class _SuiteFile(BaseModel):
+    """The YAML shape of a suite, checked before anything is imported or run."""
+    model_config = ConfigDict(extra="forbid")
+    environment: str
+    agent: str | None = None
+    tools: str | None = None
+    tasks: list[dict[str, Any]] = Field(min_length=1)
 
 
 def load_suite(path: str | Path) -> Suite:
-    data = yaml.safe_load(Path(path).read_text())
+    """Read a tasks file. Names in it are imported from the working directory."""
+    spec = _SuiteFile.model_validate(yaml.safe_load(Path(path).read_text()))
     # The environment's module is imported before any task is read, so custom graders defined
-    # there are registered in time.
-    environment_class = import_environment(data.get("environment", ""))
-    suite = Suite.model_validate(data)
-    suite._environment_class = environment_class
-    return suite
+    #   there are registered in time.
+    environment = import_object(spec.environment)
+    return Suite(environment=environment, tasks=spec.tasks,
+                 agent=import_object(spec.agent) if spec.agent else None,
+                 tools=import_object(spec.tools) if spec.tools else None)
 
 
-def import_environment(target: str) -> type[Environment]:
+def import_object(target: str) -> Any:
+    """`package.module:name` to the object it names."""
     module, _, name = target.partition(":")
     if not (module and name):
-        raise ValueError(f"environment must look like 'package.module:ClassName', got {target!r}")
-    cls = getattr(importlib.import_module(module), name)
-    if not (isinstance(cls, type) and issubclass(cls, Environment)):
-        raise ValueError(f"{target} is not an Environment subclass")
-    return cls
+        raise ValueError(f"expected 'package.module:name', got {target!r}")
+    return getattr(importlib.import_module(module), name)

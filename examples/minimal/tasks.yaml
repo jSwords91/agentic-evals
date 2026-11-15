@@ -14,6 +14,8 @@
 #   python -m agentic_evals run   examples/minimal/tasks.yaml
 
 environment: examples.minimal.env:Stateless
+agent: examples.minimal.agent:WRITER
+tools: examples.minimal.env:tools
 
 tasks:
   - id: too_long_for_a_listing

@@ -1,9 +1,9 @@
-"""The eval environment for the analyst agent, and the graders written for it.
+"""The eval world for the analyst agent, and the graders written for it.
 
 Each trial gets a fresh copy of the warehouse, and an empty list for the answers the agent
-records. The agent can't change the warehouse (its connection is read-only), so the copy matters
-less for isolation than for trust: the graders run reference queries on exactly the data the
-agent saw.
+records; `tools` points the agent's tools at both. The agent can't change the warehouse (its
+connection is read-only), so the copy matters less for isolation than for trust: the graders
+run reference queries on exactly the data the agent saw.
 
 E14: the graders here are the heart of this example's evals. All of them grade the recorded
 answer, the agent's deliverable, never which tools it called:
@@ -27,10 +27,10 @@ from decimal import ROUND_HALF_UP, Decimal
 from pathlib import Path
 from typing import Any, ClassVar, Literal
 
-from agentic_evals import Agent
+from agentic_evals import Tool
 from agentic_evals.evals import Environment, Grade, Grader, Trial, register
 
-from .agent import RecordedAnswer, build_agent
+from .tools import RecordedAnswer, warehouse_tools
 from .warehouse import create_db
 
 
@@ -38,9 +38,6 @@ class Warehouse(Environment):
     def setup(self, workdir: Path) -> None:
         self.db = create_db(workdir / "warehouse.db")
         self.answers: list[RecordedAnswer] = []
-
-    def agent(self) -> Agent:
-        return build_agent(self.db, self.answers)
 
     def query(self, query: str) -> Any:
         return self.rows(query)[0][0]
@@ -56,6 +53,11 @@ class Warehouse(Environment):
         """The latest recorded answer: the one the team would see."""
         return self.answers[-1] if self.answers else None
 
+
+
+def tools(env: Warehouse) -> list[Tool]:
+    """The analyst's tools, pointed at this trial's warehouse and answer list."""
+    return warehouse_tools(env.db, env.answers)
 
 def normalise(rows: list[tuple], ordered: bool) -> list[tuple]:
     """Rows made comparable. Within a row, text labels come first (lower-cased), then numbers,

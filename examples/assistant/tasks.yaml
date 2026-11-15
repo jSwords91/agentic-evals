@@ -22,6 +22,8 @@
 # empty outbox. This is a starting set. Grow it from transcripts where the agent got it wrong.
 
 environment: examples.assistant.env:Workspace
+agent: examples.assistant.agent:ASSISTANT
+tools: examples.assistant.env:tools
 
 tasks:
 

@@ -3,14 +3,16 @@
 from __future__ import annotations
 
 import asyncio
+from collections.abc import Sequence
+from typing import Any
 
 import anthropic
 
 from .agent import Agent
 
 
-async def chat(agent: Agent, greeting: str = "") -> None:
-    async with agent.session() as session:
+async def chat(agent: Agent, tools: Sequence[Any] = (), greeting: str = "") -> None:
+    async with agent.session(tools) as session:
         print(greeting or "Chatting with the agent. Ctrl-D to quit.", end="\n\n")
         while True:
             try:

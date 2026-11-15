@@ -2,22 +2,42 @@
 
 A worked example of building a Claude agent and evaluating it with task-based evals.
 
-There are four example agents, from ten lines to a full assistant. Start with the one closest to
-the agent you want to evaluate. Each has its own README explaining its design.
+There are four example agents, from ten lines to a full assistant, and a notebook that walks
+through improving one of them with evals, step by step. Start with the notebook, or with the
+example closest to the agent you want to evaluate. Each example has its own README explaining its
+design.
 
 ## Quickstart
 
 Requires Python 3.12+ and [uv](https://docs.astral.sh/uv/).
 
 ```bash
-uv run pytest -q                                                    # 148 offline tests, free
+uv run pytest -q                                                    # 152 offline tests, free
 uv run python -m agentic_evals check examples/analyst/tasks.yaml    # replay reference solutions, free
 
 export ANTHROPIC_API_KEY=...
 uv run python -m examples.analyst                                   # ask an example agent questions
 uv run python -m agentic_evals run examples/analyst/tasks.yaml --trials 3
 uv run python -m agentic_evals run examples/assistant/tasks.yaml --suite regression --trials 3 --gate 0.9
+uv run --group notebook jupyter lab                                 # then open notebooks/
 ```
+
+## The walkthrough notebook
+
+[`notebooks/improving-an-analyst-agent.ipynb`](notebooks/improving-an-analyst-agent.ipynb) builds
+the analyst the way you'd build an agent for a real team:
+
+1. Decide what you'll grade, before you build anything.
+2. Check the tasks for free, with their reference solutions.
+3. Build the simplest version that could work, and run a baseline.
+4. Read the failed transcripts.
+5. Change one thing at a time (the tools, then the definitions, then the prompt), rerun, and
+   compare with the previous run.
+6. Find the cheapest model and effort that keep it passing.
+7. Save a baseline and gate future changes on it.
+
+Each step quotes the Anthropic guidance it follows. The notebook is shipped without outputs:
+results vary between runs, so it tells you what to look for rather than what you'll see.
 
 ## The examples
 
@@ -39,9 +59,15 @@ What each one teaches:
 - **assistant**: everything together: MCP, skills, the injection screen, rules enforced in code,
   and tasks about prompt injection, privacy and impersonation.
 
-Every example has the same four parts: the agent (`agent.py`), an environment for evals
-(`env.py`), a tasks file (`tasks.yaml`), and `__main__.py` to chat with it. That's what you'd
-write for your own agent.
+Every example has the same parts, and they're what you'd write for your own agent:
+
+| File | What it is |
+| --- | --- |
+| `agent.py` | The brain: an `Agent` constant with the prompt, model, limits and skills |
+| `tools.py` | The hands: the tools, built from whatever they need (a database, a client) |
+| `env.py` | The world for evals: fresh state per trial, how to read the outcome, and `tools(env)` to point the tools at it |
+| `tasks.yaml` | The tasks, naming the world, the brain and the hands |
+| `__main__.py` | A chat with the agent, for trying things |
 
 ## An agent in a few lines
 
@@ -53,37 +79,44 @@ def word_count(text: str) -> int:
     """Count the words in a piece of text."""
     return len(text.split())
 
-agent = Agent(system="You are a concise writing assistant.", tools=[word_count])
+agent = Agent(system="You are a concise writing assistant.")   # the brain
 
-async with agent.session() as session:
+async with agent.session([word_count]) as session:              # joined to its hands
     reply = await session.send("How many words are in 'the quick brown fox jumps'?")
     print(reply.text, session.tool_log, session.cost_usd)
 ```
 
-An `Agent` is the prompt, the model, the tools and the limits. A `Session` is one conversation:
-the MCP connections, the message history, the log of tool calls and the cost. Each eval trial
-gets a new session.
+Three parts, kept separate, following Anthropic's [Managed Agents](https://www.anthropic.com/research/managed-agents)
+design of a brain, hands and a session:
+
+- **The brain**, an `Agent`: the prompt, the model, the effort, the limits, the skills and the
+  injection screen. It holds no tools and no resources, so it's a plain constant you can share,
+  compare and change with `dataclasses.replace(agent, model=...)`.
+- **The hands**, the tools: `@tool` functions and MCP servers, in one list. Tools that need a
+  database or a client get it when the list is built.
+- **The session**: one conversation joining a brain to a set of hands. It holds the message
+  history, the log of tool calls and the cost. Each eval trial gets a new one.
+
+Keeping them apart is what lets an eval run the same tasks against two versions of a prompt, two
+models or two sets of tools, and lets production and evals share every line of the agent's code.
 
 ## How it fits together
 
 ```
-                         Agent: system prompt, model, effort, limits
-                           │
-      ┌────────────────────┼─────────────────────────┬──────────────────────┐
-      │                    │                         │                      │
-  @tool functions     MCP servers               skills/*/SKILL.md      Screen (Haiku)
-  run in-process      stdio, HTTP or            listed in the prompt,  checks text marked
-                      in-process                loaded on demand       <untrusted> before
-                                                                       the model reads it
-      └────────────────────┴───────────┬─────────────┘
-                                       │
-                         Session: one loop, one conversation
-                           calls the model, runs the tools it asks for (concurrently),
-                           returns results in one message, stops at max_turns or max_cost
+   the brain: Agent                                 the hands: a list of tools
+   prompt, model, effort, limits                    @tool functions, run in-process
+   skills/*/SKILL.md, listed in the prompt          MCP servers: stdio, HTTP or in-process
+   Screen (Haiku): checks text marked <untrusted>
+                 │                                                │
+                 └──────────────────────┬─────────────────────────┘
+                                        │
+                     Session = agent.session(tools): one conversation
+                       calls the model, runs the tools it asks for (concurrently),
+                       returns results in one message, stops at max_turns or max_cost
 
-python -m agentic_evals run tasks.yaml
+evaluate(suite, agent=..., tools=...)        or: python -m agentic_evals run tasks.yaml
   for each task, for each trial:
-    fresh Environment ─> agent.session().send(task.input)
+    fresh Environment ─> agent.session(tools(env)).send(task.input)
                       ─> code graders read the final state, the tool calls and the reply
                       ─> an LLM judge reads the reply, one call per criterion
                       ─> transcript
@@ -120,10 +153,10 @@ bug, but the model still sees it as an error result and the conversation carries
 ### Tools that need a database or a client
 
 Most real tools need something: a database connection, an API client, a config. Define them
-inside a function that takes those things as arguments, and build the agent there:
+inside a function that takes those things as arguments and returns the tools:
 
 ```python
-def build_agent(db: Path, status: StatusPage) -> Agent:
+def ticket_tools(db: Path, status: StatusPage) -> list[Tool]:
     @tool
     def check_service_status(service: Literal["vpn", "email", "wifi", "payroll"]) -> str:
         """The current status of a company service, from the status page."""
@@ -134,22 +167,23 @@ def build_agent(db: Path, status: StatusPage) -> Agent:
         """Set a ticket's priority and the team that will handle it."""
         ...  # writes to `db`
 
-    return Agent(system=SYSTEM, tools=[check_service_status, triage_ticket, ...])
+    return [check_service_status, triage_ticket, ...]
 ```
 
-This is what makes an agent testable. Production calls `build_agent` with the real database and
+This is what makes an agent testable. Production calls `ticket_tools` with the real database and
 the real status page. An eval calls it with a test database and a status page that gives fixed
-answers. The agent's code is the same in both. See `examples/helpdesk/agent.py`.
+answers. The brain and the tools' code are the same in both. See `examples/helpdesk/tools.py`.
 
 ### MCP servers
 
 ```python
-Agent(..., mcp_servers=[stdio("python", "-m", "my_server", env={"DB": path})])
+agent.session([convert_time, stdio("python", "-m", "my_server", env={"DB": path})])
 ```
 
-`mcp_servers` takes anything `mcp.Client` accepts: `stdio(...)` for a local command, a URL for a
-remote server over Streamable HTTP, or an `MCPServer` object to run in-process in tests. MCP
-tools look exactly like local tools to the loop and to the model.
+An MCP server goes in the same list as local tools. It can be anything `mcp.Client` accepts:
+`stdio(...)` for a local command, a URL for a remote server over Streamable HTTP, or an
+`MCPServer` object to run in-process in tests. Its tools look exactly like local tools to the
+loop and to the model.
 
 Use MCP for systems the agent uses but doesn't own, such as an inbox, a calendar or another
 team's service: the same server can then serve this agent, Claude Desktop or the next agent
@@ -202,21 +236,24 @@ right answer has to be the same every time the task runs. So each trial runs the
 fresh copy of whatever its tools touch, built from fixed data, and the graders read that copy
 when it's done.
 
-An `Environment` says how to make the copy and how to read it:
+An `Environment` is that world: how to make the copy and how to read it. It knows nothing about
+the agent. A small function next to it points the agent's tools at the copy:
 
 ```python
 class Helpdesk(Environment):
     def setup(self, workdir):        # make a fresh copy for one trial
         self.db = create_db(workdir / "tickets.db")
-
-    def agent(self):                 # the agent, pointed at the copy
-        return build_agent(self.db, FixedStatusPage(STATUS))
+        self.status = FixedStatusPage(STATUS)
 
     def query(self, sql):            # read one value from the copy, for state graders
         ...
 
     def snapshot(self):              # optional: extra records to keep in the transcript
         ...
+
+
+def tools(env: Helpdesk) -> list[Tool]:     # the agent's hands, pointed at this trial's world
+    return ticket_tools(env.db, env.status)
 ```
 
 Every trial gets a new instance and an empty temporary folder, so no trial sees another's
@@ -236,7 +273,9 @@ which a `state` grader compares with its target.
 ### The tasks file
 
 ```yaml
-environment: examples.helpdesk.env:Helpdesk
+environment: examples.helpdesk.env:Helpdesk    # the world
+agent: examples.helpdesk.agent:HELPDESK        # the brain to test by default
+tools: examples.helpdesk.env:tools             # the hands to give it by default
 
 tasks:
   - id: access_request_goes_to_security
@@ -258,6 +297,7 @@ tasks:
 | Field | Meaning |
 | --- | --- |
 | `environment` | The `Environment` subclass the tasks run in, as `module:ClassName` |
+| `agent`, `tools` | The agent and tools to test unless you pass others: an `Agent`, and a function from the environment to a list of tools |
 | `id` | Unique name; also the transcript's file name |
 | `suite` | `regression` (should pass nearly every time; gates CI) or `capability` (hard; reported, never gates) |
 | `input` | The user's message, written the way a real user would write it |
@@ -311,6 +351,8 @@ Two things that look like route checks aren't needed at all:
 
 ### Running
 
+From the command line:
+
 ```bash
 python -m agentic_evals check TASKS     # validate, then replay reference solutions and replies (no model, free)
 python -m agentic_evals run TASKS       # run the evals
@@ -318,6 +360,8 @@ python -m agentic_evals run TASKS       # run the evals
 
 | Option | Default | |
 | --- | --- | --- |
+| `--agent MODULE:NAME` | the tasks file's | Test a different agent against the same tasks |
+| `--tools MODULE:NAME` | the tasks file's | Give it different tools |
 | `--suite` | `all` | `regression`, `capability` or `all` |
 | `--task ID` | | Run only this task; repeat for more |
 | `--trials` | 3 | Trials per task (n) |
@@ -328,6 +372,20 @@ python -m agentic_evals run TASKS       # run the evals
 | `--compare FILE` | | An earlier `results/latest.json`: shows which tasks flipped, and cost and latency |
 | `--results DIR` | `results` | Where the report and transcripts go |
 | `--concurrency` | 4 | Trials at once |
+
+From Python (a notebook, a script), the same thing returns a `Results` object:
+
+```python
+results = await evaluate(suite, agent=ANALYST, tools=tools, trials=3)
+results.table()                          # one row per task
+results.failures()                       # what went wrong in each failed trial
+results.transcript("revenue_for_a_month")
+results.compare(baseline)                # which tasks flipped, and cost and latency
+results.save("results/baseline.json")
+```
+
+A suite can come from a tasks file (`load_suite(path)`) or be built in code:
+`Suite(environment=Warehouse, tasks=[...])`.
 
 The report has one row per task: passes out of n, pass@k, pass^k, partial credit, cost per
 trial, model calls, failed tool calls, seconds and cache hit rate, plus which graders failed. It
@@ -398,14 +456,15 @@ the design in full. In outline:
 2. **Decide where each defence lives.** Code where it must always hold (a read-only connection;
    the answer recorded as SQL whose value code computes). Tools and skills where the agent needs
    knowledge (column descriptions; metric definitions). The prompt for the rest.
-3. **Pass in what the tools touch.** Write `build_agent(...)` so it takes the database, clients
-   and config as arguments (see
-   [Tools that need a database or a client](#tools-that-need-a-database-or-a-client)).
+3. **Separate the brain from the hands.** The brain is an `Agent` constant: prompt, model,
+   skills. The hands are a function that takes the database, clients and config and returns the
+   tools (see [Tools that need a database or a client](#tools-that-need-a-database-or-a-client)).
    Production calls it with the real things.
 4. **Write an environment.** Use the table in
    [The environment](#the-environment-what-a-trial-runs-against) to decide what a trial gets
-   instead. For the analyst, it's a small warehouse with the real schema and seeded rows that
-   include the real traps: test accounts, refunds, discounted prices.
+   instead, and write the small `tools(env)` function that hands it to your tools. For the
+   analyst, it's a small warehouse with the real schema and seeded rows that include the real
+   traps: test accounts, refunds, discounted prices.
 5. **Write tasks from real requests.** Take them from the team's channel, tickets or logs, in the
    words people used. For each, decide what a right answer is and pick the grader from
    [Choosing a grader](#choosing-a-grader). For the analyst, that's a reference query per
@@ -414,8 +473,10 @@ the design in full. In outline:
 6. **Check it for free:** `python -m agentic_evals check tasks.yaml`. A failure here means a task
    or a grader is wrong, not the agent.
 7. **Run it:** `python -m agentic_evals run tasks.yaml --trials 3`, and read the transcripts of
-   the failures before you trust the graders. Grow the suite to 20 to 50 tasks, drawn from real
-   requests and real mistakes, then add `--gate 0.9` to CI.
+   the failures before you trust the graders. Then improve one thing at a time and compare each
+   run with the last: the [notebook](notebooks/improving-an-analyst-agent.ipynb) does exactly
+   this. Grow the suite to 20 to 50 tasks, drawn from real requests and real mistakes, then add
+   `--gate 0.9` to CI.
 
 ### Add a task
 
@@ -431,9 +492,9 @@ the design in full. In outline:
 
 Say the helpdesk agent gets a new tool, `assign_to_person(ticket_id, email)`.
 
-1. **Write it** inside `build_agent`, and add it to the agent's `tools` list. If it needs a new
-   dependency (another API client, say), add that as an argument to `build_agent`, and have the
-   environment pass a fake.
+1. **Write it** inside `ticket_tools`, and add it to the list it returns. If it needs a new
+   dependency (another API client, say), add that as an argument to `ticket_tools`, give the
+   environment a fake of it in `setup`, and pass it on in `tools(env)`. The brain doesn't change.
 2. **Make its effect readable.** If the tool changes something, make sure `query` can see the
    change. Here that's an `assignee` column in the tickets table.
 3. **Add at least two tasks, graded on the outcome.** One where the ticket should end up
@@ -475,24 +536,26 @@ use it in the tasks file as `type: reply_word_limit`. The examples have three mo
 
 | File | What it is |
 | --- | --- |
+| `notebooks/improving-an-analyst-agent.ipynb` | The whole method, step by step, on one agent |
 | `examples/minimal/` | The smallest agent, and the smallest eval |
-| `examples/helpdesk/` | Tools that get their database and clients as arguments; a faked service |
+| `examples/helpdesk/` | Brain, hands and world in separate files; tools that get their database and clients as arguments; a faked service |
 | `agentic_evals/tools.py` | `@tool` and `ToolError` |
 | `agentic_evals/mcp.py` | MCP servers as tools |
 | `agentic_evals/skills.py` | Skills and `load_skill` |
 | `agentic_evals/screen.py` | `untrusted()` and the screen |
-| `agentic_evals/agent.py` | `Agent`, `Session` and the loop |
+| `agentic_evals/agent.py` | `Agent` (the brain), `Session` (brain plus tools) and the loop |
 | `agentic_evals/usage.py` | Tokens and cost |
-| `agentic_evals/evals/environment.py` | The `Environment` base class |
-| `agentic_evals/evals/tasks.py` | The tasks file |
+| `agentic_evals/evals/environment.py` | The `Environment` base class: the world a trial runs in |
+| `agentic_evals/evals/tasks.py` | Tasks and suites, from a file or from code |
 | `agentic_evals/evals/graders.py` | The built-in graders, and how to add your own |
 | `agentic_evals/evals/metrics.py` | pass@k, pass^k and the gate |
-| `agentic_evals/evals/runner.py` | Trials, transcripts and infrastructure errors |
+| `agentic_evals/evals/runner.py` | `evaluate()`: trials, transcripts and infrastructure errors |
+| `agentic_evals/evals/results.py` | `Results`: the table, failures, comparisons and transcripts |
 | `agentic_evals/evals/screening.py` | The screen's component eval |
 | `agentic_evals/__main__.py` | The command line |
 | `examples/analyst/` | Trustworthy numbers: schema from tools, definitions in a skill, answers graded against reference queries |
 | `examples/assistant/` | MCP, skills, the screen, rules in code, and safety tasks |
-| `tests/` | 148 offline tests |
+| `tests/` | 152 offline tests, including the notebook's offline cells |
 | `.github/workflows/evals.yml` | Lint, tests and every example's reference solutions on each PR; the gated regression suites when a key is set; capability nightly |
 
 ## Design notes
@@ -518,7 +581,7 @@ grep -rn "\[DE\]" --include=*.py --include=*.yaml .
 | A1 | One loop. Tool calls in a batch run concurrently and their results go back in one message |
 | A2 | The harness enforces turn and cost limits; the model isn't asked to |
 | A3 | Simplest design first: no router, planner or subagents. A separate model judges, never the agent itself |
-| A4 | Definition (`Agent`) and conversation (`Session`) are separate |
+| A4 | Brain (`Agent`), hands (tools) and session are separate; the eval world is separate from all three, so any agent can be evaluated with any tools against the same tasks |
 | A5 | A tool that fails returns an error the model can see, not a crashed conversation |
 | A6 | A refusal or cut-off response ends the turn, and any tool calls in it are answered so the history stays valid |
 

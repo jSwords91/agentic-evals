@@ -13,6 +13,8 @@
 #   python -m agentic_evals run   examples/analyst/tasks.yaml
 
 environment: examples.analyst.env:Warehouse
+agent: examples.analyst.agent:ANALYST
+tools: examples.analyst.env:tools
 
 tasks:
 

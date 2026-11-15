@@ -14,8 +14,9 @@ uv run python -m agentic_evals run examples/helpdesk/tasks.yaml      # live
 | --- | --- |
 | `db.py` | The ticket database and the tickets the tasks use |
 | `status.py` | The status page: a live client for production, a fixed one for evals |
-| `agent.py` | The prompt (with the triage policy) and four tools, built by `build_agent(db, status)` |
-| `env.py` | A fresh ticket database and a fixed status page for every trial |
+| `agent.py` | The brain: `HELPDESK`, a prompt with the triage policy |
+| `tools.py` | The hands: `ticket_tools(db, status)` builds four tools for the database and status page |
+| `env.py` | The world: a fresh ticket database and a fixed status page per trial, and `tools(env)` |
 | `tasks.yaml` | Six tasks |
 
 ## Why this example
@@ -24,10 +25,11 @@ Most agents look like this one. Their tools read and write the team's own data, 
 service someone else runs. This example shows how to evaluate that kind of agent without
 changing its code.
 
-**The agent takes what its tools need as arguments.** `build_agent(db, status)` defines the
-tools inside it, so they use the database and status page they're given. Production passes the
-real database and `LiveStatusPage`. The eval environment passes a fresh test database and
-`FixedStatusPage`.
+**The brain, the hands and the world are separate.** `HELPDESK` is only a prompt. The tools come
+from `ticket_tools(db, status)`, which defines them inside it so they use the database and status
+page they're given. Production passes the real database and `LiveStatusPage`. In an eval, the
+environment creates a fresh test database and a `FixedStatusPage`, and `tools(env)` passes those
+instead. Neither the brain nor the tools know which.
 
 **The status page is faked in evals, on purpose.** A trial mustn't depend on what a real service
 says today, or the same task could pass on Monday and fail on Tuesday with no change to the

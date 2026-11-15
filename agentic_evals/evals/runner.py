@@ -1,10 +1,14 @@
-"""The eval harness: run every task several times, each on a fresh environment, and grade it.
+"""The eval harness: run every task several times, each in a fresh environment, and grade it.
 
-Most people will use it through the command line (see __main__.py). The pieces are:
+    results = await evaluate(suite, agent=ANALYST, tools=tools, trials=3)
+    results.table()
 
-    run_trial   one attempt at one task: fresh environment, agent, graders, transcript
-    run_suite   many trials, a few at a time
-    summarise   per-task pass@k, pass^k, cost and latency
+The agent and tools under test are arguments, not part of the suite. So the same tasks can be
+run against a first draft of an agent and its next version, or against two models, and the
+results compared task by task. The pieces are:
+
+    evaluate    many trials, a few at a time, summarised into Results
+    run_trial   one attempt at one task: fresh environment, session, graders, transcript
     replay      a task's reference solution with no model, through the code graders (E9)
 """
 
@@ -15,16 +19,18 @@ import dataclasses
 import json
 import tempfile
 import time
-from dataclasses import dataclass
+from collections.abc import Collection, Sequence
 from pathlib import Path
-from typing import Any
+from typing import Any, Literal
 
 import anthropic
 from mcp import MCPError
 
 from ..agent import Agent, ToolCall
+from .environment import ToolFactory
 from .graders import Grade, Trial
 from .metrics import pass_at_k, pass_hat_k
+from .results import Results
 from .tasks import Suite, Task
 
 # E13: what counts as infrastructure rather than the agent: API outages and rate limits, an MCP
@@ -32,26 +38,43 @@ from .tasks import Suite, Task
 INFRA_ERRORS = (anthropic.APIError, MCPError, OSError)
 
 
-@dataclass(frozen=True)
-class Overrides:
-    """Changes to the agent under test for one run: the experiments you'll actually make."""
-    model: str | None = None
-    effort: str | None = None
-    no_screen: bool = False
+async def evaluate(suite: Suite, *, agent: Agent | None = None, tools: ToolFactory | None = None,
+                   trials: int = 3, k: int | None = None,
+                   include: Literal["regression", "capability", "all"] = "all",
+                   task_ids: Collection[str] = (), results_dir: str | Path = "results",
+                   concurrency: int = 4, client: Any = None, judge_client: Any = None) -> Results:
+    """Run the suite's tasks against `agent` with `tools` (by default, the suite's own).
 
-    def apply(self, agent: Agent) -> Agent:
-        changes: dict[str, Any] = {k: v for k, v in (("model", self.model), ("effort", self.effort)) if v}
-        if self.no_screen:
-            changes["screen"] = None
-        return dataclasses.replace(agent, **changes)
+    `include` and `task_ids` pick the tasks. `client` is the API client for the agent and
+    `judge_client` the one for judges; leave both out to use ANTHROPIC_API_KEY.
+    """
+    agent = agent or suite.agent
+    if agent is None:
+        raise ValueError("No agent to test: pass agent=, or name one in the suite.")
+    tools = tools or suite.tools or (lambda env: [])
+    if unknown := sorted(set(task_ids) - {t.id for t in suite.tasks}):
+        raise ValueError(f"No task called {', '.join(unknown)} in this suite.")
+    tasks = [t for t in suite.tasks
+             if include in ("all", t.suite) and (not task_ids or t.id in task_ids)]
+    k = k or trials
+    results_dir = Path(results_dir)
+    judge_client = judge_client or anthropic.AsyncAnthropic()
+    semaphore = asyncio.Semaphore(concurrency)
+
+    async def limited(task: Task, i: int) -> dict[str, Any]:
+        async with semaphore:
+            return await run_trial(suite, task, i, agent, tools, results_dir, client, judge_client)
+
+    runs = list(await asyncio.gather(*(limited(t, i) for t in tasks for i in range(trials))))
+    return Results(agent={"model": agent.model, "effort": agent.effort, "screen": agent.screen is not None},
+                   k=k, tasks=summarise(tasks, runs, k), trials=runs)
 
 
-async def run_trial(suite: Suite, task: Task, index: int, overrides: Overrides,
+async def run_trial(suite: Suite, task: Task, index: int, agent: Agent, tools: ToolFactory,
                     results_dir: Path, client: Any = None, judge_client: Any = None) -> dict[str, Any]:
     with tempfile.TemporaryDirectory() as tmp:
-        env = suite.new_environment()
+        env = suite.environment()
         env.setup(Path(tmp))
-        agent = overrides.apply(env.agent())
         start = time.monotonic()
         infra_error = None
         # E13: an infrastructure error isn't an agent failure. The trial is left out of pass^k
@@ -61,7 +84,7 @@ async def run_trial(suite: Suite, task: Task, index: int, overrides: Overrides,
         #   stop the run: counted as infrastructure, it would quietly shrink n and leave pass^k
         #   looking healthy. `except*` because errors from inside the MCP client arrive in groups.
         try:
-            async with agent.session(client) as session:
+            async with agent.session(tools(env), client) as session:
                 reply = await session.send(task.input)
             seconds = time.monotonic() - start
             trial = Trial(task, reply.text, session.tool_log, env, judge_client)
@@ -107,20 +130,7 @@ async def run_trial(suite: Suite, task: Task, index: int, overrides: Overrides,
     return summary
 
 
-async def run_suite(suite: Suite, tasks: list[Task], trials: int, overrides: Overrides,
-                    results_dir: Path, concurrency: int = 4, client: Any = None,
-                    judge_client: Any = None) -> list[dict[str, Any]]:
-    judge_client = judge_client or anthropic.AsyncAnthropic()
-    semaphore = asyncio.Semaphore(concurrency)
-
-    async def limited(task: Task, i: int) -> dict[str, Any]:
-        async with semaphore:
-            return await run_trial(suite, task, i, overrides, results_dir, client, judge_client)
-
-    return list(await asyncio.gather(*(limited(t, i) for t in tasks for i in range(trials))))
-
-
-def summarise(tasks: list[Task], trials: list[dict[str, Any]], k: int) -> dict[str, dict[str, Any]]:
+def summarise(tasks: Sequence[Task], trials: list[dict[str, Any]], k: int) -> dict[str, dict[str, Any]]:
     summary = {}
     for task in tasks:
         runs = [t for t in trials if t["task"] == task.id]
@@ -139,7 +149,7 @@ def summarise(tasks: list[Task], trials: list[dict[str, Any]], k: int) -> dict[s
     return summary
 
 
-async def replay(suite: Suite, task: Task) -> tuple[list[Grade], list[ToolCall]]:
+async def replay(suite: Suite, task: Task, tools: ToolFactory | None = None) -> tuple[list[Grade], list[ToolCall]]:
     """E9: run a task's reference solution with no model, then apply its code graders.
 
     Graders that read the reply are checked against the task's reference_reply, and skipped if
@@ -147,11 +157,14 @@ async def replay(suite: Suite, task: Task) -> tuple[list[Grade], list[ToolCall]]
     a grader is wrong, and you've found out for free, before any trial spends money. Returns the
     grades and the tool calls, so a caller can also spot a reference step that errored.
     """
+    tools = tools or suite.tools or (lambda env: [])
+    # The suite's agent, if it has one, so its skills can be loaded; no screen, which would call
+    #   a model. The agent's model is never called.
+    agent = dataclasses.replace(suite.agent, screen=None) if suite.agent else Agent(system="")
     with tempfile.TemporaryDirectory() as tmp:
-        env = suite.new_environment()
+        env = suite.environment()
         env.setup(Path(tmp))
-        agent = dataclasses.replace(env.agent(), screen=None)
-        async with agent.session() as session:
+        async with agent.session(tools(env)) as session:
             for name, args in task.reference_solution:
                 await session.call_tool(name, args)
         trial = Trial(task, task.reference_reply or "", session.tool_log, env, judge_client=None)

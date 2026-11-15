@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+from dataclasses import replace
 from pathlib import Path
 from typing import Literal
 
@@ -11,29 +12,21 @@ import pytest
 import yaml
 from pydantic import ValidationError
 
-from agentic_evals import Agent, Screen, tool
-from agentic_evals.evals import Environment, Grade, Grader, Task, Trial, load_suite, register
+from agentic_evals import Agent, Screen, Tool, tool
+from agentic_evals.evals import Environment, Grade, Grader, Results, Suite, Task, Trial, evaluate, load_suite, register
 from agentic_evals.evals.graders import Verdict
 from agentic_evals.evals.metrics import pass_at_k, pass_hat_k, regression_gate
-from agentic_evals.evals.runner import Overrides, replay, run_trial, summarise
+from agentic_evals.evals.runner import replay, run_trial, summarise
 from agentic_evals.evals.screening import Case, run_cases, score
 from agentic_evals.screen import Verdict as ScreenVerdict
 from tests.conftest import API_DOWN, ScriptedModel, response, text, tool_use
 
 
 class Notes(Environment):
-    """The smallest environment: a list of notes and a tool that adds one."""
+    """The smallest world: a list of notes."""
 
     def setup(self, workdir: Path) -> None:
         self.notes: list[str] = []
-
-    def agent(self) -> Agent:
-        @tool
-        def add_note(text: str) -> str:
-            """Add a note."""
-            self.notes.append(text)
-            return "Added."
-        return Agent(system="Take notes.", tools=[add_note], screen=Screen())
 
     def query(self, query: str) -> int:
         return {"count": len(self.notes)}[query]  # anything else is a grader bug: KeyError
@@ -42,8 +35,25 @@ class Notes(Environment):
         return {"notes": self.notes}
 
 
+def note_tools(notes: list[str]) -> list[Tool]:
+    """The hands, given the list they write to."""
+    @tool
+    def add_note(text: str) -> str:
+        """Add a note."""
+        notes.append(text)
+        return "Added."
+    return [add_note]
+
+
+def tools(env: Notes) -> list[Tool]:
+    return note_tools(env.notes)
+
+
+NOTE_TAKER = Agent(system="Take notes.", screen=Screen())   # the brain
+
 TASK = {"id": "one_note", "suite": "regression", "input": "Note that the cat is fed.",
         "graders": [{"type": "state", "name": "one_note", "query": "count", "expect": "== 1"},
+                    # Here only to test the grader itself; the examples grade outcomes.
                     {"type": "tool_calls", "name": "used_tool", "must_succeed": ["add_note"]},
                     {"type": "judge", "dimensions": {"confirms": "The reply confirms the note."}}],
         "reference_solution": [["add_note", {"text": "cat fed"}]]}
@@ -51,7 +61,8 @@ TASK = {"id": "one_note", "suite": "regression", "input": "Note that the cat is 
 
 def write_suite(tmp_path: Path, *tasks: dict) -> Path:
     path = tmp_path / "tasks.yaml"
-    path.write_text(yaml.safe_dump({"environment": "tests.test_evals:Notes", "tasks": list(tasks)}))
+    path.write_text(yaml.safe_dump({"environment": "tests.test_evals:Notes", "agent": "tests.test_evals:NOTE_TAKER",
+                                    "tools": "tests.test_evals:tools", "tasks": list(tasks)}))
     return path
 
 
@@ -63,7 +74,7 @@ def note_taker() -> ScriptedModel:
 def trial(tmp_path: Path, task: dict = TASK, model: ScriptedModel | None = None,
           judge: ScriptedModel | None = None) -> dict:
     suite = load_suite(write_suite(tmp_path, task))
-    return asyncio.run(run_trial(suite, suite.tasks[0], 0, Overrides(), tmp_path / "results",
+    return asyncio.run(run_trial(suite, suite.tasks[0], 0, suite.agent, suite.tools, tmp_path / "results",
                                  model or note_taker(), judge or ScriptedModel()))
 
 
@@ -102,7 +113,7 @@ def test_malformed_tasks_are_rejected_on_load(change):
 
 
 def test_a_suite_rejects_duplicate_ids_and_unknown_environments(tmp_path):
-    with pytest.raises(ValidationError, match="duplicate task ids"):
+    with pytest.raises(ValueError, match="duplicate task ids"):
         load_suite(write_suite(tmp_path, TASK, TASK))
     path = tmp_path / "bad.yaml"
     path.write_text(yaml.safe_dump({"environment": "tests.test_evals:Task", "tasks": [TASK]}))
@@ -208,11 +219,30 @@ def test_summaries_leave_out_infrastructure_errors_and_need_k_trials():
     assert summary["pass_hat_k"] is None  # 1 usable trial can't estimate pass^2
 
 
-def test_overrides_change_only_what_they_name():
-    agent = Notes().agent()
-    changed = Overrides(model="claude-sonnet-5-5", no_screen=True).apply(agent)
-    assert (changed.model, changed.effort, changed.screen) == ("claude-sonnet-5-5", agent.effort, None)
-    assert agent.screen is not None  # the original is untouched
+def test_one_suite_runs_against_any_agent_and_tools(tmp_path):
+    """A4: the suite holds the tasks and the world; the brain and the hands are arguments."""
+    suite = Suite(environment=Notes, tasks=[TASK])   # built in code: no YAML, no default agent
+
+    def run(agent: Agent, label: str) -> Results:
+        return asyncio.run(evaluate(suite, agent=agent, tools=tools, trials=1, results_dir=tmp_path / label,
+                                    client=note_taker(), judge_client=ScriptedModel()))
+
+    first = run(NOTE_TAKER, "first")
+    second = run(replace(NOTE_TAKER, model="claude-sonnet-5-5"), "second")
+    assert first.tasks["one_note"]["passed"] == 1 and second.agent["model"] == "claude-sonnet-5-5"
+    assert first.transcript("one_note")["environment"] == {"notes": ["cat fed"]}
+    saved = first.save(tmp_path / "first.json")
+    assert Results.load(saved).tasks == first.tasks
+    second.compare(saved)  # prints which tasks flipped; none here
+    assert first.gate(0.9) == (1.0, True)
+
+
+def test_evaluate_needs_an_agent_and_known_task_ids(tmp_path):
+    suite = Suite(environment=Notes, tasks=[TASK])
+    with pytest.raises(ValueError, match="No agent"):
+        asyncio.run(evaluate(suite, tools=tools))
+    with pytest.raises(ValueError, match="No task called typo"):
+        asyncio.run(evaluate(suite, agent=NOTE_TAKER, task_ids=["typo"]))
 
 
 # ---------------------------------------------------------------- the screen's eval (E12)
