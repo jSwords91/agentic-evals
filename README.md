@@ -10,7 +10,7 @@ the agent you want to evaluate. Each has its own README explaining its design.
 Requires Python 3.12+ and [uv](https://docs.astral.sh/uv/).
 
 ```bash
-uv run pytest -q                                                    # 145 offline tests, free
+uv run pytest -q                                                    # 148 offline tests, free
 uv run python -m agentic_evals check examples/analyst/tasks.yaml    # replay reference solutions, free
 
 export ANTHROPIC_API_KEY=...
@@ -330,9 +330,11 @@ python -m agentic_evals run TASKS       # run the evals
 | `--concurrency` | 4 | Trials at once |
 
 The report has one row per task: passes out of n, pass@k, pass^k, partial credit, cost per
-trial, model calls, seconds and cache hit rate, plus which graders failed. Then it prints each
-failed trial: which grader failed and why, how the turn ended, the start of the reply, and the
-transcript to open.
+trial, model calls, failed tool calls, seconds and cache hit rate, plus which graders failed. It
+flags a capability task that passed every trial (move it to regression) and any task that never
+passed (more often a broken task than a hard one: check it before blaming the agent). Then it
+prints each failed trial: which grader failed and why, how the turn ended, the start of the
+reply, and the transcript to open.
 
 **pass@k and pass^k.** Agents don't give the same answer every time, so each task runs several
 times. pass@k is the chance that at least one of k tries succeeds. pass^k is the chance that all
@@ -353,7 +355,7 @@ Each trial writes `results/transcripts/<task>-<trial>.json`, summary first:
 | `passed`, `score`, `grades` | The verdict. Each grade has a `detail`: the value found, what was missing, or the judge's reasoning |
 | `failed`, `unknown` | Which graders failed, and which the judge couldn't decide (read those yourself) |
 | `reply`, `stop_reason` | What the user got, and why the turn ended |
-| `model_calls`, `cost_usd`, `cache_hit_rate`, `seconds` | What it cost |
+| `model_calls`, `tool_errors`, `cost_usd`, `cache_hit_rate`, `seconds` | What it cost, and how many tool calls failed |
 | `tool_log` | Every tool call: its input, its output and whether it errored |
 | `redacted` | Text the screen removed, and why |
 | `environment` | Whatever the environment's `snapshot()` returns, such as the final state of the tickets |
@@ -490,7 +492,7 @@ use it in the tasks file as `type: reply_word_limit`. The examples have three mo
 | `agentic_evals/__main__.py` | The command line |
 | `examples/analyst/` | Trustworthy numbers: schema from tools, definitions in a skill, answers graded against reference queries |
 | `examples/assistant/` | MCP, skills, the screen, rules in code, and safety tasks |
-| `tests/` | 145 offline tests |
+| `tests/` | 148 offline tests |
 | `.github/workflows/evals.yml` | Lint, tests and every example's reference solutions on each PR; the gated regression suites when a key is set; capability nightly |
 
 ## Design notes
@@ -595,6 +597,10 @@ grep -rn "\[DE\]" --include=*.py --include=*.yaml .
   user would test clarifying questions end to end.
 - **Judge calibration.** Before a judge gates anything, label 20 to 50 transcripts yourself and
   check it agrees.
+- **The other layers.** Automated evals are the first line of defence, not the only one. In
+  production they sit alongside monitoring of live traffic, user feedback, A/B tests of
+  significant changes, and someone reading a sample of real transcripts every week. No single
+  layer catches every problem.
 - **Tool search and code execution with MCP.** These pay off with dozens of tools or large
   results. The examples' handful of tools, returning a few lines each, don't need them.
 
@@ -606,22 +612,26 @@ grep -rn "\[DE\]" --include=*.py --include=*.yaml .
   anything, so with one of those you'd screen whole results instead.
 - MCP tools return text only. Images and other content types would need converting.
 - Check the prices in `agentic_evals/usage.py` against the pricing page before quoting a cost.
+- When a refusal falls back to another model, the reported cost counts only the attempt that
+  answered, at the agent's model's prices. The API's `usage.iterations` has the exact figures.
 - Brightleaf, Harbour & Finch, Northfield Logistics and everyone in them are fictional.
 
 ## References
 
 | Key | Source |
 | --- | --- |
-| DE | [Demystifying evals for AI agents](https://www.anthropic.com/research/demystifying-evals-for-ai-agents) |
-| BEA | [Building effective agents](https://www.anthropic.com/engineering/building-effective-agents) |
-| CTX | [Effective context engineering for AI agents](https://www.anthropic.com/research/effective-context-engineering-for-ai-agents) |
-| TOOLS | [Writing effective tools for agents](https://www.anthropic.com/research/writing-tools-for-agents) |
-| SKILLS | [Equipping agents for the real world with Agent Skills](https://www.anthropic.com/research/equipping-agents-for-the-real-world-with-agent-skills) |
+| DE | [Demystifying evals for AI agents](https://www.anthropic.com/engineering/demystifying-evals-for-ai-agents) |
+| BEA | [Building effective AI agents](https://www.anthropic.com/engineering/building-effective-agents) |
+| CTX | [Effective context engineering for AI agents](https://www.anthropic.com/engineering/effective-context-engineering-for-ai-agents) |
+| TOOLS | [Writing effective tools for AI agents](https://www.anthropic.com/engineering/writing-tools-for-agents) |
+| SKILLS | [Equipping agents for the real world with Agent Skills](https://www.anthropic.com/engineering/equipping-agents-for-the-real-world-with-agent-skills) |
 | CEM | [Code execution with MCP](https://www.anthropic.com/engineering/code-execution-with-mcp) |
 | FOLD | [When to fold subagents into your main agent loop](https://claude.com/resources/articles/building-agents-when-to-fold-subagents-into-your-main-agent-loop) |
 | HD | [Harness design for long-running application development](https://www.anthropic.com/research/harness-design-long-running-apps) |
 | MA | [Scaling Managed Agents](https://www.anthropic.com/research/managed-agents) |
 | CONTAIN | [How we contain Claude across products](https://www.anthropic.com/research/how-we-contain-claude) |
+| SKILLDOC | [Skill authoring best practices](https://platform.claude.com/docs/en/agents-and-tools/agent-skills/best-practices) |
+| INJECT | [Mitigate jailbreaks and prompt injections](https://platform.claude.com/docs/en/test-and-evaluate/strengthen-guardrails/mitigate-jailbreaks) |
 | docs | Claude API docs: tool use, strict tools, structured outputs, prompt caching, effort, adaptive thinking, refusal fallbacks |
 
 The agent's shape started from

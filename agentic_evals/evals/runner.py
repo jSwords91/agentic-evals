@@ -88,6 +88,8 @@ async def run_trial(suite: Suite, task: Task, index: int, overrides: Overrides,
         "reply": reply.text, "stop_reason": reply.stop_reason,
         # E10/K2: the numbers that decide whether a change is worth making.
         "model_calls": session.usage.calls, "cost_usd": session.cost_usd,
+        # [TOOLS]: many failed tool calls point at a tool's description or its error messages.
+        "tool_errors": sum(c.is_error for c in session.tool_log),
         "cache_hit_rate": session.usage.cache_hit_rate, "seconds": seconds,
         "redactions": len(session.redactions), "transcript": str(path),
     }
@@ -125,7 +127,7 @@ def summarise(tasks: list[Task], trials: list[dict[str, Any]], k: int) -> dict[s
         ok = [t for t in runs if "error" not in t]
         n, c = len(ok), sum(t["passed"] for t in ok)
         mean = {key: sum(t[key] for t in ok) / n if n else 0.0
-                for key in ("score", "cost_usd", "seconds", "model_calls", "cache_hit_rate")}
+                for key in ("score", "cost_usd", "seconds", "model_calls", "tool_errors", "cache_hit_rate")}
         summary[task.id] = {
             "suite": task.suite, "n": n, "passed": c, "errors": len(runs) - n,
             "pass_at_k": pass_at_k(n, c, k) if n >= k else None,

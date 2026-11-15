@@ -67,13 +67,15 @@ def run(db: Path, sql: str) -> tuple[list[str], list[tuple]]:
             cursor = con.execute(sql)
             return [d[0] for d in cursor.description or []], cursor.fetchall()
     except sqlite3.Error as e:
-        raise ToolError(f"SQL error: {e}") from None
+        raise ToolError(f"SQL error: {e}. describe_table shows each table's columns.") from None
 
 
-def table(columns: list[str], rows: list[tuple]) -> str:
-    """T4 [TOOLS]: compact, capped output. Say how many rows there were, so a cut-off is visible."""
+def format_rows(columns: list[str], rows: list[tuple]) -> str:
+    """T4 [TOOLS]: compact, capped output. When rows are cut, say so and say how to narrow the
+    query, so the model doesn't reason from a partial result."""
     lines = [" | ".join(columns)] + [" | ".join("NULL" if v is None else str(v) for v in r) for r in rows[:MAX_ROWS]]
-    more = f"\n({len(rows)} rows; showing the first {MAX_ROWS})" if len(rows) > MAX_ROWS else f"\n({len(rows)} rows)"
+    more = (f"\n({len(rows)} rows; showing the first {MAX_ROWS}. Aggregate, filter or add a LIMIT to see "
+            "what you need.)" if len(rows) > MAX_ROWS else f"\n({len(rows)} rows)")
     return "\n".join(lines) + more
 
 
@@ -88,19 +90,19 @@ def build_agent(db: Path, answers: list[RecordedAnswer]) -> Agent:
                          for name, about in TABLES.items())
 
     @tool
-    def describe_table(name: Table) -> str:
+    def describe_table(table: Table) -> str:
         """A table's columns, with their types and what they mean, and three example rows.
         Read this before querying a table: it says how tables join and what coded values mean."""
-        _, info = run(db, f"PRAGMA table_info({name})")  # the live schema, so it's never out of date
-        columns = [f"  {c[1]} ({c[2]}): {COLUMNS[name].get(c[1], 'no description')}" for c in info]
-        return f"{name}: {TABLES[name]}\n" + "\n".join(columns) + "\n\nExample rows:\n" + table(
-            *run(db, f"SELECT * FROM {name} LIMIT 3"))
+        _, info = run(db, f"PRAGMA table_info({table})")  # the live schema, so it's never out of date
+        columns = [f"  {c[1]} ({c[2]}): {COLUMNS[table].get(c[1], 'no description')}" for c in info]
+        return f"{table}: {TABLES[table]}\n" + "\n".join(columns) + "\n\nExample rows:\n" + format_rows(
+            *run(db, f"SELECT * FROM {table} LIMIT 3"))
 
     @tool
     def run_sql(sql: str) -> str:
         """Run a read-only SQLite query on the warehouse and see the result (at most 50 rows).
         Use it to explore and to check your working."""
-        return table(*run(db, sql))
+        return format_rows(*run(db, sql))
 
     @tool
     def record_answer(sql: str) -> str:
@@ -109,9 +111,10 @@ def build_agent(db: Path, answers: list[RecordedAnswer]) -> Agent:
         breakdown one row per group with its label and figure. Round as the definitions say."""
         columns, rows = run(db, sql)
         if not rows or len(rows) > MAX_ROWS:
-            raise ToolError(f"An answer needs between 1 and {MAX_ROWS} rows; this query returned {len(rows)}.")
+            fix = "Check the filters." if not rows else "Aggregate, or select one row per group."
+            raise ToolError(f"An answer needs between 1 and {MAX_ROWS} rows; this query returned {len(rows)}. {fix}")
         answers.append(RecordedAnswer(sql, columns, rows))
-        return "Recorded. The answer is:\n" + table(columns, rows)
+        return "Recorded. The answer is:\n" + format_rows(columns, rows)
 
     return Agent(system=SYSTEM, tools=[list_tables, describe_table, run_sql, record_answer],
                  skills=HERE / "skills")

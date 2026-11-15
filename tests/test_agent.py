@@ -14,6 +14,7 @@ from pydantic import Field
 from agentic_evals import Agent, Screen, ToolError, tool, untrusted
 from agentic_evals.screen import REDACTED, UNTRUSTED
 from agentic_evals.screen import Verdict as ScreenVerdict
+from agentic_evals.skills import load_skills
 from tests.conftest import API_DOWN, ScriptedModel, response, text, tool_use
 
 
@@ -245,3 +246,15 @@ def test_mcp_tools_work_like_local_tools():
     assert session.tool_log[0].output == "value" and "No such key" in session.tool_log[1].output
     sent = {t["name"]: t for t in model.requests[0]["tools"]}
     assert sent["lookup"]["strict"] is False and sent["shout"]["strict"] is True
+
+
+@pytest.mark.parametrize("name, description", [
+    ("Refunds", "How to refund."),             # capital letters
+    ("refund_policy", "How to refund."),       # underscore
+    ("refunds", ""),                           # no description
+], ids=["capitals", "underscore", "empty-description"])
+def test_skills_must_follow_the_published_format(tmp_path, name, description):
+    (tmp_path / "s").mkdir()
+    (tmp_path / "s" / "SKILL.md").write_text(f"---\nname: {name}\ndescription: '{description}'\n---\nBody.")
+    with pytest.raises(ValueError):
+        load_skills(tmp_path)

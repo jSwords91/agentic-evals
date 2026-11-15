@@ -1,6 +1,6 @@
 ---
-name: email
-description: How to write email for Maya, and what must never be shared. Load before replying to, drafting or sending any email.
+name: writing-email
+description: How to write email as Maya, what may be sent outside the studio, and what must never be shared. Use before replying to, drafting or sending any email.
 ---
 
 # Email

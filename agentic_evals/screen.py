@@ -46,7 +46,9 @@ def untrusted(text: str) -> str:
 class Screen:
     model: str = "claude-haiku-5-5"
     effort: str = "low"
-    max_tokens: int = 1000
+    # Haiku 5.5 thinks before it answers. A response cut off mid-thought has no verdict, and the
+    #   screen would then remove harmless text, so leave room. Only tokens used are billed.
+    max_tokens: int = 4000
 
 
 class Verdict(BaseModel):

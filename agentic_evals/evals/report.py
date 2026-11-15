@@ -12,19 +12,23 @@ def fmt(x: float | None) -> str:
 
 def print_table(tasks: dict[str, dict[str, Any]], k: int) -> None:
     print(f"\n{'task':38} {'suite':10} {'pass':>5} pass@{k} pass^{k} {'score':>5} "
-          f"{'$/trial':>7} {'calls':>5} {'secs':>5} {'cache':>5}")
+          f"{'$/trial':>7} {'calls':>5} {'tool err':>8} {'secs':>5} {'cache':>5}")
     for tid, r in tasks.items():
         notes = ([f"failed: {', '.join(r['failed_graders'])}"] * bool(r["failed_graders"])
                  + [f"review: {', '.join(r['needs_review'])}"] * bool(r["needs_review"])
                  + [f"infra errors: {r['errors']}"] * bool(r["errors"]))
         print(f"{tid:38} {r['suite']:10} {r['passed']:>2}/{r['n']:<2} {fmt(r['pass_at_k'])} "
               f"{fmt(r['pass_hat_k'])} {r['score']:5.2f} {r['cost_usd']:7.4f} "
-              f"{r['model_calls']:5.1f} {r['seconds']:5.1f} {r['cache_hit_rate']:5.0%}  "
+              f"{r['model_calls']:5.1f} {r['tool_errors']:8.1f} {r['seconds']:5.1f} {r['cache_hit_rate']:5.0%}  "
               + "  ".join(notes))
         if r["suite"] == "capability" and r["pass_hat_k"] == 1.0:
             # E6 [DE]: a capability task that passes every time has graduated. Move it to the
             #   regression suite and write a harder one, or the suite stops telling you anything.
             print(f"  ^ {tid} passed every trial: move it to regression")
+        if r["n"] >= 3 and r["passed"] == 0:
+            # [DE]: a task nothing ever passes is more often broken than hard. Before blaming the
+            #   agent, check the task can be passed and everything graded is clear from the input.
+            print(f"  ^ {tid} never passed: check the task and its graders before the agent")
 
 
 def print_comparison(tasks: dict[str, dict[str, Any]], baseline: dict[str, dict[str, Any]]) -> None:

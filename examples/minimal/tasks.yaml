@@ -24,7 +24,7 @@ tasks:
       of live music in the old boathouse. Tickets include a drink on arrival, and food is
       available from local traders. Doors open at 7pm and the first act starts at 7:45."
     graders:
-      - {name: says_36_words, type: reply, must_match: '\b36\b'}
+      - {name: says_36_words, type: reply, must_match: '\b(36|thirty-six)\b'}
       # "Too long" can be said many ways, including with a negation ("it isn't short enough")
       #   that a pattern would misread. That's meaning: a judge's job.
       - type: judge
@@ -43,7 +43,7 @@ tasks:
       small architecture studio in Bristol. She looks after its finances, hiring and the
       day-to-day running of the office."
     graders:
-      - {name: says_27_words, type: reply, must_match: '\b27\b'}
+      - {name: says_27_words, type: reply, must_match: '\b(27|twenty-seven)\b'}
       - type: judge
         dimensions:
           says_it_fits: The reply says the bio fits within the 30-word limit.

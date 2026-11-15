@@ -61,7 +61,7 @@ def test_a_runaway_query_is_stopped(warehouse, monkeypatch):
 
 
 def test_the_agent_sees_column_descriptions_and_example_rows(warehouse):
-    text = asyncio.run(tool(warehouse, "describe_table").run({"name": "customers"}))
+    text = asyncio.run(tool(warehouse, "describe_table").run({"table": "customers"}))
     assert "is_test (INTEGER): 1 for internal test accounts" in text and "Example rows" in text
 
 

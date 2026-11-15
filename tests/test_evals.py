@@ -202,7 +202,7 @@ def test_a_grader_bug_stops_the_run_rather_than_counting_as_infrastructure(tmp_p
 def test_summaries_leave_out_infrastructure_errors_and_need_k_trials():
     trials = [{"task": "one_note", "trial": 0, "error": "down"},
               {"task": "one_note", "trial": 1, "passed": True, "score": 1.0, "cost_usd": 0.01,
-               "seconds": 1.0, "model_calls": 2, "cache_hit_rate": 0.5, "failed": [], "unknown": []}]
+               "seconds": 1.0, "model_calls": 2, "tool_errors": 0, "cache_hit_rate": 0.5, "failed": [], "unknown": []}]
     [summary] = summarise([Task.model_validate(TASK)], trials, k=2).values()
     assert (summary["n"], summary["passed"], summary["errors"]) == (1, 1, 1)
     assert summary["pass_hat_k"] is None  # 1 usable trial can't estimate pass^2

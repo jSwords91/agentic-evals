@@ -367,7 +367,8 @@ def respond_to_event(event_id: int, response: Literal["accepted", "declined"]) -
         if theirs:
             c.execute("UPDATE events SET my_response=? WHERE id=?", (response, event_id))
     if r is None:
-        raise refuse("respond_to_event", args, f"Maya isn't invited to an upcoming meeting {event_id}.")
+        raise refuse("respond_to_event", args,
+                     f"Maya isn't invited to an upcoming meeting {event_id}. Use list_events to find it.")
     if not theirs:
         raise refuse("respond_to_event", args, "Maya organised this meeting. Use cancel_event to cancel it.")
     audit("respond_to_event", args, response)

@@ -34,6 +34,9 @@ class Usage:
     calls: int = 0
 
     def add(self, usage: Any) -> None:
+        # One known gap: when a refusal falls back to another model, the top-level usage covers
+        #   only the attempt that answered, and it's priced here at this Usage's model. The
+        #   response's usage.iterations has the exact per-attempt figures.
         self.calls += 1
         self.input_tokens += usage.input_tokens
         self.output_tokens += usage.output_tokens

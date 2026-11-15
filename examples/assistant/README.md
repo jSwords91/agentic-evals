@@ -16,7 +16,7 @@ uv run python -m agentic_evals screen examples/assistant/screen_cases.yaml
 | `data.py` | The inbox, calendar and contacts: seed data for every trial |
 | `server.py` | An MCP server with ten tools, and the rules enforced in code |
 | `agent.py` | The prompt, a local `convert_time` tool, and `build_agent` |
-| `skills/` | Two procedures: `scheduling` and `email` |
+| `skills/` | Two procedures: `scheduling-meetings` and `writing-email` |
 | `env.py` | A fresh workspace per trial, and the `workspace_unchanged` and `not_disclosed` graders |
 | `tasks.yaml` | Fourteen tasks |
 | `screen_cases.yaml` | Twenty labelled snippets for the injection screen's eval |

@@ -1,6 +1,6 @@
 ---
-name: metrics
-description: Brightleaf's agreed definitions of revenue, orders, average order value, gross profit, gross margin, active customers and repeat rate, and how to report them. Load before calculating any figure.
+name: calculating-metrics
+description: Brightleaf's agreed definitions of revenue, orders, average order value, gross profit, gross margin, active customers and repeat rate, and how to report them. Use before calculating any figure.
 ---
 
 # Metric definitions

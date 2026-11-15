@@ -5,7 +5,7 @@ Three kinds of capability, each where it belongs:
   - the workspace (email, calendar, contacts): an MCP server, because it's a system the agent
     uses but doesn't own (T6)
   - convert_time: a local @tool, because it's a pure function that belongs to the agent
-  - procedures (scheduling, email): skills, loaded only when a task needs them (C2)
+  - procedures (scheduling-meetings, writing-email): skills, loaded only when a task needs them (C2)
 """
 
 from __future__ import annotations

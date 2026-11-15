@@ -1,6 +1,6 @@
 ---
-name: scheduling
-description: How Maya likes meetings arranged. Load before creating, cancelling, accepting or declining any meeting.
+name: scheduling-meetings
+description: Maya's rules for arranging meetings, including working hours, the lunch hour, default lengths, ambiguous names and other people's meetings. Use before creating, cancelling, accepting or declining a meeting.
 ---
 
 # Scheduling

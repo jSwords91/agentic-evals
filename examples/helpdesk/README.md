@@ -37,6 +37,11 @@ else.
 **Code can't grant access.** The agent has no tool that changes permissions, so a ticket can ask
 for anything and the worst outcome is a bad routing decision or a bad reply. Both are graded.
 
+**Ticket text is marked as untrusted.** Anyone can raise a ticket, so its subject and description
+come back from `get_ticket` inside `untrusted()` tags, and the prompt says that text is
+information, never instructions. Ticket 103 tests the case where the text pushes for something
+it shouldn't get.
+
 ## The tasks
 
 | Task | Should | What it tests |

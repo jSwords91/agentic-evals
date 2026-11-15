@@ -13,7 +13,7 @@ uv run python -m agentic_evals run examples/analyst/tasks.yaml       # live
 | File | What it is |
 | --- | --- |
 | `warehouse.py` | The schema, a description of every table and column, and seeded data |
-| `skills/metrics/SKILL.md` | The agreed definition of each metric |
+| `skills/calculating-metrics/SKILL.md` | The agreed definition of each metric |
 | `agent.py` | The prompt and four tools: `list_tables`, `describe_table`, `run_sql`, `record_answer` |
 | `env.py` | A fresh warehouse and an empty answer list per trial, and three graders |
 | `tasks.yaml` | Eight questions, each with a reference query |
@@ -26,7 +26,7 @@ the ways a number goes wrong, and puts a defence against each one where it holds
 | What goes wrong | The defence | Where it lives |
 | --- | --- | --- |
 | The agent joins the wrong tables, or misreads a column | It reads the live schema and a description of every column before writing SQL | `describe_table` |
-| It uses the wrong definition: counts refunds, includes test accounts | The agreed definitions are written down, and loaded before any calculation | `skills/metrics/SKILL.md` |
+| It uses the wrong definition: counts refunds, includes test accounts | The agreed definitions are written down, and loaded before any calculation | `skills/calculating-metrics/SKILL.md` |
 | It makes up a figure, or misquotes the one it found | The answer is recorded as SQL, and its value is computed by code from that SQL. A person can rerun it | `record_answer` |
 | It gives a figure without saying what it counts | The prompt asks for the period and definition with every figure | `SYSTEM`, and a judge criterion |
 | It answers a question the data can't answer | The prompt says to say so, and the definitions list what isn't measured | `SYSTEM`, the skill |
