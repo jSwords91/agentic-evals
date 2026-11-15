@@ -2,16 +2,6 @@
 
 A worked example of building a Claude agent and evaluating it with task-based evals.
 
-It's a reference implementation, meant to be read, copied and changed, not installed and built
-on. The core is about 1,500 lines, including comments. Each design decision in it is labelled
-with an ID that links back to this README and to Anthropic's published guidance.
-
-There are two parts. The agent code is an `Agent` class, a `@tool` decorator, MCP servers,
-skills and an injection screen. The eval code is a YAML tasks file, graders, pass^k, a CI gate
-and transcripts you can read. Neither part knows anything about the example, so you can keep
-both and swap the example for your own. The example in `examples/assistant` is an assistant
-that manages one person's email and calendar.
-
 Start with the example, then read the code in the order listed under
 [Reading order](#reading-order).
 
@@ -45,15 +35,6 @@ agent = Agent(system="You are a concise writing assistant.", tools=[word_count])
 async with agent.session() as session:
     reply = await session.send("How many words are in 'the quick brown fox jumps'?")
     print(reply.text, session.tool_log, session.cost_usd)
-```
-
-An `Agent` is a definition: prompt, model, tools and limits. It can't be changed after it's
-made, so the same agent can run many times, and a variant is a new object:
-
-```python
-agent.replace(model="claude-sonnet-5-5", effort="low")
-agent.without_tools("send_email")
-agent.with_tools(convert_time)
 ```
 
 A `Session` is one conversation. It holds the MCP connections, the message history, the log of
