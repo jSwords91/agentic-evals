@@ -5,7 +5,8 @@
 The brain holds no tools and no resources. Its tools (tools.py) are built separately, from the
 ticket database and status page they work on, and joined to it for each conversation:
 
-    async with HELPDESK.session(ticket_tools(db, status)) as session: ...
+    async with Hands(ticket_tools(db, status)) as hands:
+        await Harness(HELPDESK, hands, Session()).send(...)
 """
 
 from agentic_evals import Agent

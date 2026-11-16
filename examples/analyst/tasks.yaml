@@ -28,14 +28,14 @@ tasks:
     graders:
       - name: right_figure
         type: answer
-        reference_sql: |
+        reference_sql: &revenue_for_a_month |
           SELECT ROUND(SUM(i.quantity * i.unit_price), 2)
           FROM orders o
           JOIN customers c ON c.id = o.customer_id
           JOIN order_items i ON i.order_id = o.id
           WHERE o.status = 'completed' AND c.is_test = 0
             AND o.ordered_at >= '2026-10-01' AND o.ordered_at < '2026-11-01'
-      - {name: reply_gives_the_figure, type: reply_states_answer}
+      - {name: reply_gives_the_figure, type: reply_states_answer, reference_sql: *revenue_for_a_month}
       - type: judge
         dimensions:
           says_what_it_counts: The reply makes clear that the figure counts completed orders only, or names the revenue definition it used.
@@ -50,13 +50,13 @@ tasks:
     graders:
       - name: right_figure
         type: answer
-        reference_sql: |
+        reference_sql: &active_customers_in_a_month |
           SELECT COUNT(DISTINCT o.customer_id)
           FROM orders o
           JOIN customers c ON c.id = o.customer_id
           WHERE o.status = 'completed' AND c.is_test = 0
             AND o.ordered_at >= '2026-10-01' AND o.ordered_at < '2026-11-01'
-      - {name: reply_gives_the_figure, type: reply_states_answer}
+      - {name: reply_gives_the_figure, type: reply_states_answer, reference_sql: *active_customers_in_a_month}
     reference_solution:
       - [record_answer, {sql: "SELECT COUNT(DISTINCT o.customer_id) FROM orders o JOIN customers c ON c.id = o.customer_id WHERE o.status = 'completed' AND c.is_test = 0 AND o.ordered_at >= '2026-10-01' AND o.ordered_at < '2026-11-01'"}]
     reference_reply: 71 customers placed at least one completed order in October.
@@ -165,7 +165,7 @@ tasks:
       - name: right_figure
         type: answer
         tolerance: 0.05
-        reference_sql: |
+        reference_sql: &repeat_rate_for_a_quarter |
           WITH per_customer AS (
             SELECT o.customer_id, COUNT(*) AS completed_orders
             FROM orders o
@@ -175,7 +175,95 @@ tasks:
             GROUP BY o.customer_id
           )
           SELECT ROUND(100.0 * SUM(completed_orders >= 2) / COUNT(*), 1) FROM per_customer
-      - {name: reply_gives_the_figure, type: reply_states_answer}
+      - {name: reply_gives_the_figure, type: reply_states_answer, reference_sql: *repeat_rate_for_a_quarter}
     reference_solution:
       - [record_answer, {sql: "WITH per_customer AS (SELECT o.customer_id, COUNT(*) AS completed_orders FROM orders o JOIN customers c ON c.id = o.customer_id WHERE o.status = 'completed' AND c.is_test = 0 AND o.ordered_at >= '2026-07-01' AND o.ordered_at < '2026-10-01' GROUP BY o.customer_id) SELECT ROUND(100.0 * SUM(completed_orders >= 2) / COUNT(*), 1) FROM per_customer"}]
     reference_reply: 76.3% of the customers who bought in Q3 placed two or more completed orders in Q3.
+
+  # The three below hinge on rules the data can't reveal: they're the team's conventions, written
+  #   in the calculating-metrics skill. An agent that explores the data carefully still has to
+  #   guess them, so these are where the definitions (the brain) should show their worth.
+
+  - id: revenue_last_7_days
+    suite: capability
+    # Today isn't over: the warehouse already has this morning's orders. The definitions say "the
+    #   last N days" means the N whole days before today, 9 to 15 November: £844.50. Including
+    #   today gives £967.50; a rolling window of 10 to 16 November gives £868.50.
+    input: What's our revenue been over the last 7 days?
+    graders:
+      - name: right_figure
+        type: answer
+        reference_sql: &revenue_last_7_days |
+          SELECT ROUND(SUM(i.quantity * i.unit_price), 2)
+          FROM orders o
+          JOIN customers c ON c.id = o.customer_id
+          JOIN order_items i ON i.order_id = o.id
+          WHERE o.status = 'completed' AND c.is_test = 0
+            AND o.ordered_at >= '2026-11-09' AND o.ordered_at < '2026-11-16'
+      - {name: reply_gives_the_figure, type: reply_states_answer, reference_sql: *revenue_last_7_days}
+      - type: judge
+        dimensions:
+          says_which_days: The reply makes clear the figure covers 9 to 15 November, or says that it leaves out today.
+    reference_solution:
+      - [record_answer, {sql: "SELECT ROUND(SUM(i.quantity * i.unit_price), 2) FROM orders o JOIN customers c ON c.id = o.customer_id JOIN order_items i ON i.order_id = o.id WHERE o.status = 'completed' AND c.is_test = 0 AND o.ordered_at >= '2026-11-09' AND o.ordered_at < '2026-11-16'"}]
+    reference_reply: Revenue over the last 7 days, 9 to 15 November, was £844.50 from completed orders. Today isn't over, so it's left out.
+
+  - id: gross_margin_by_category
+    suite: capability
+    # Margin is total gross profit over total revenue, as a percentage to one decimal place:
+    #   Care 67.4, Houseplants 61.4, Pots 64.2. Averaging each line's margin gives 62.3 and 65.1
+    #   for the last two (the wrong grain again), and a fraction (0.614) fails the reporting rule.
+    input: What gross margin did each product category make in Q3?
+    graders:
+      - name: right_breakdown
+        type: answer
+        tolerance: 0.05
+        reference_sql: |
+          SELECT p.category,
+                 ROUND(100.0 * SUM(i.quantity * (i.unit_price - p.unit_cost)) / SUM(i.quantity * i.unit_price), 1)
+          FROM orders o
+          JOIN customers c ON c.id = o.customer_id
+          JOIN order_items i ON i.order_id = o.id
+          JOIN products p ON p.id = i.product_id
+          WHERE o.status = 'completed' AND c.is_test = 0
+            AND o.ordered_at >= '2026-07-01' AND o.ordered_at < '2026-10-01'
+          GROUP BY p.category
+    reference_solution:
+      - [record_answer, {sql: "SELECT p.category, ROUND(100.0 * SUM(i.quantity * (i.unit_price - p.unit_cost)) / SUM(i.quantity * i.unit_price), 1) FROM orders o JOIN customers c ON c.id = o.customer_id JOIN order_items i ON i.order_id = o.id JOIN products p ON p.id = i.product_id WHERE o.status = 'completed' AND c.is_test = 0 AND o.ordered_at >= '2026-07-01' AND o.ordered_at < '2026-10-01' GROUP BY p.category"}]
+
+  - id: region_growth_against_q3
+    suite: capability
+    # Several steps: each region's Q3 revenue over three months, its October revenue, and the
+    #   change between them as a percentage. Scotland +75.1, South -3.5, Midlands -14.9,
+    #   North -38.8. Comparing with September alone, or with Q3's total, gives other figures; the
+    #   test accounts (all in the South) would move the South to -2.2.
+    input: How did each region's revenue in October compare with an average month in Q3? Which grew fastest?
+    graders:
+      - name: right_breakdown
+        type: answer
+        tolerance: 0.05
+        reference_sql: |
+          WITH q3 AS (
+            SELECT c.region, SUM(i.quantity * i.unit_price) / 3.0 AS average_month
+            FROM orders o
+            JOIN customers c ON c.id = o.customer_id
+            JOIN order_items i ON i.order_id = o.id
+            WHERE o.status = 'completed' AND c.is_test = 0
+              AND o.ordered_at >= '2026-07-01' AND o.ordered_at < '2026-10-01'
+            GROUP BY c.region
+          ), october AS (
+            SELECT c.region, SUM(i.quantity * i.unit_price) AS revenue
+            FROM orders o
+            JOIN customers c ON c.id = o.customer_id
+            JOIN order_items i ON i.order_id = o.id
+            WHERE o.status = 'completed' AND c.is_test = 0
+              AND o.ordered_at >= '2026-10-01' AND o.ordered_at < '2026-11-01'
+            GROUP BY c.region
+          )
+          SELECT region, ROUND(100.0 * (october.revenue - q3.average_month) / q3.average_month, 1)
+          FROM q3 JOIN october USING (region)
+      - type: judge
+        dimensions:
+          right_conclusion: The reply says Scotland grew fastest.
+    reference_solution:
+      - [record_answer, {sql: "WITH q3 AS (SELECT c.region, SUM(i.quantity * i.unit_price) / 3.0 AS average_month FROM orders o JOIN customers c ON c.id = o.customer_id JOIN order_items i ON i.order_id = o.id WHERE o.status = 'completed' AND c.is_test = 0 AND o.ordered_at >= '2026-07-01' AND o.ordered_at < '2026-10-01' GROUP BY c.region), october AS (SELECT c.region, SUM(i.quantity * i.unit_price) AS revenue FROM orders o JOIN customers c ON c.id = o.customer_id JOIN order_items i ON i.order_id = o.id WHERE o.status = 'completed' AND c.is_test = 0 AND o.ordered_at >= '2026-10-01' AND o.ordered_at < '2026-11-01' GROUP BY c.region) SELECT region, ROUND(100.0 * (october.revenue - q3.average_month) / q3.average_month, 1) FROM q3 JOIN october USING (region)"}]

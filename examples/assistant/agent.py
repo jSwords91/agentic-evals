@@ -4,7 +4,8 @@ The brain is the prompt, the procedures (skills, loaded only when a task needs t
 injection screen. It holds no tools and no resources. Its tools are built separately (tools.py)
 and joined to it for each conversation:
 
-    async with ASSISTANT.session(workspace_tools(db)) as session: ...
+    async with Hands(workspace_tools(db)) as hands:
+        await Harness(ASSISTANT, hands, Session()).send(...)
 """
 
 from pathlib import Path

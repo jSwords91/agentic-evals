@@ -26,29 +26,28 @@ def check_priced(model: str) -> None:
 
 @dataclass
 class Usage:
-    model: str
     input_tokens: int = 0
     output_tokens: int = 0
     cache_read_tokens: int = 0
     cache_write_tokens: int = 0
     calls: int = 0
+    cost_usd: float = 0.0
 
-    def add(self, usage: Any) -> None:
+    def add(self, usage: Any, model: str) -> None:
+        """Count one response's usage, priced at the model that served it."""
         # One known gap: when a refusal falls back to another model, the top-level usage covers
-        #   only the attempt that answered, and it's priced here at this Usage's model. The
+        #   only the attempt that answered, and it's priced here at the requested model. The
         #   response's usage.iterations has the exact per-attempt figures.
+        tokens = (usage.input_tokens, usage.output_tokens,
+                  usage.cache_read_input_tokens or 0, usage.cache_creation_input_tokens or 0)
+        p_in, p_out, p_read = PRICES[model]
         self.calls += 1
-        self.input_tokens += usage.input_tokens
-        self.output_tokens += usage.output_tokens
-        self.cache_read_tokens += usage.cache_read_input_tokens or 0
-        self.cache_write_tokens += usage.cache_creation_input_tokens or 0
-
-    @property
-    def cost_usd(self) -> float:
-        p_in, p_out, p_read = PRICES[self.model]
-        return (self.input_tokens * p_in + self.output_tokens * p_out
-                + self.cache_read_tokens * p_read
-                + self.cache_write_tokens * p_in * CACHE_WRITE_MULTIPLIER) / 1e6
+        self.input_tokens += tokens[0]
+        self.output_tokens += tokens[1]
+        self.cache_read_tokens += tokens[2]
+        self.cache_write_tokens += tokens[3]
+        self.cost_usd += (tokens[0] * p_in + tokens[1] * p_out + tokens[2] * p_read
+                          + tokens[3] * p_in * CACHE_WRITE_MULTIPLIER) / 1e6
 
     @property
     def cache_hit_rate(self) -> float:

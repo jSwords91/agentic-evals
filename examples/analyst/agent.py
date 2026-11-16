@@ -16,7 +16,8 @@ number wrong, and puts each defence where it holds most firmly:
 
 The brain holds none of the tools or resources. They're joined for each conversation:
 
-    async with ANALYST.session(warehouse_tools(db, answers)) as session: ...
+    async with Hands(warehouse_tools(db, answers)) as hands:
+        await Harness(ANALYST, hands, Session()).send(...)
 """
 
 from pathlib import Path

@@ -26,7 +26,11 @@ from typing import Any, Literal
 import anthropic
 from mcp import MCPError
 
-from ..agent import Agent, ToolCall
+from ..agent import Agent
+from ..hands import Hands
+from ..harness import Harness
+from ..session import Session
+from ..tools import ToolCall
 from .environment import ToolFactory
 from .graders import Grade, Trial
 from .metrics import pass_at_k, pass_hat_k
@@ -83,11 +87,12 @@ async def run_trial(suite: Suite, task: Task, index: int, agent: Agent, tools: T
         #   the judge). A bug in the harness or a grader (a typo in a query, a KeyError) must
         #   stop the run: counted as infrastructure, it would quietly shrink n and leave pass^k
         #   looking healthy. `except*` because errors from inside the MCP client arrive in groups.
+        session = Session()  # E8: a fresh log per trial, like the environment
         try:
-            async with agent.session(tools(env), client) as session:
-                reply = await session.send(task.input)
+            async with Hands(tools(env)) as hands:
+                reply = await Harness(agent, hands, session, client).send(task.input)
             seconds = time.monotonic() - start
-            trial = Trial(task, reply.text, session.tool_log, env, judge_client)
+            trial = Trial(task, reply.text, session.tool_calls, env, judge_client)
             judged = await asyncio.gather(*(g.grade(trial) for g in task.graders if g.uses_model))
         except* INFRA_ERRORS as group:
             infra_error = group
@@ -112,20 +117,22 @@ async def run_trial(suite: Suite, task: Task, index: int, agent: Agent, tools: T
         # E10/K2: the numbers that decide whether a change is worth making.
         "model_calls": session.usage.calls, "cost_usd": session.cost_usd,
         # [TOOLS]: many failed tool calls point at a tool's description or its error messages.
-        "tool_errors": sum(c.is_error for c in session.tool_log),
+        "tool_errors": sum(c.is_error for c in session.tool_calls),
         "cache_hit_rate": session.usage.cache_hit_rate, "seconds": seconds,
         "redactions": len(session.redactions), "transcript": str(path),
     }
     # E10 [DE]: the whole transcript, summary first, raw detail after. Reading transcripts is
-    #   how you find out whether a failure is the agent's fault or the grader's.
+    #   how you find out whether a failure is the agent's fault or the grader's. The raw detail
+    #   is the session itself: the same log production keeps, so a trial reads like a real
+    #   conversation. The tool log and redactions are read from it, for quick reading.
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(json.dumps({
         **summary,
         "input": task.input,
-        "tool_log": [dataclasses.asdict(c) for c in session.tool_log],
+        "tool_log": [dataclasses.asdict(c) for c in session.tool_calls],
         "redacted": session.redactions,
         "environment": snapshot,
-        "messages": [_dump(m) for m in session.messages],
+        "session": [e.model_dump(mode="json") for e in session],
     }, indent=2, default=str, ensure_ascii=False))
     return summary
 
@@ -150,28 +157,25 @@ def summarise(tasks: Sequence[Task], trials: list[dict[str, Any]], k: int) -> di
 
 
 async def replay(suite: Suite, task: Task, tools: ToolFactory | None = None) -> tuple[list[Grade], list[ToolCall]]:
-    """E9: run a task's reference solution with no model, then apply its code graders.
+    """E9: run a task's reference solution on the hands alone, then apply its code graders.
 
     Graders that read the reply are checked against the task's reference_reply, and skipped if
     it has none. Every grade should pass. If one doesn't, the task can't be passed as written or
     a grader is wrong, and you've found out for free, before any trial spends money. Returns the
     grades and the tool calls, so a caller can also spot a reference step that errored.
     """
+    # No brain at all: the hands don't need one, which is what keeping them apart buys (A4).
     tools = tools or suite.tools or (lambda env: [])
-    # The suite's agent, if it has one, so its skills can be loaded; no screen, which would call
-    #   a model. The agent's model is never called.
-    agent = dataclasses.replace(suite.agent, screen=None) if suite.agent else Agent(system="")
     with tempfile.TemporaryDirectory() as tmp:
         env = suite.environment()
         env.setup(Path(tmp))
-        async with agent.session(tools(env)) as session:
-            for name, args in task.reference_solution:
-                await session.call_tool(name, args)
-        trial = Trial(task, task.reference_reply or "", session.tool_log, env, judge_client=None)
+        async with Hands(tools(env)) as hands:
+            tool_calls = [await hands.execute(name, args) for name, args in task.reference_solution]
+        trial = Trial(task, task.reference_reply or "", tool_calls, env, judge_client=None)
         checkable = [g for g in task.graders
                      if not g.uses_model and (task.reference_reply is not None or not g.reads_reply)]
         grades = [grade for spec in checkable for grade in await spec.grade(trial)]
-        return grades, session.tool_log
+        return grades, tool_calls
 
 
 def _leaves(error: BaseException) -> list[BaseException]:
@@ -180,9 +184,3 @@ def _leaves(error: BaseException) -> list[BaseException]:
         return [leaf for sub in error.exceptions for leaf in _leaves(sub)]
     return [error]
 
-
-def _dump(message: dict[str, Any]) -> dict[str, Any]:
-    content = message["content"]
-    if not isinstance(content, str):
-        content = [b.model_dump(exclude_none=True) if hasattr(b, "model_dump") else b for b in content]
-    return {"role": message["role"], "content": content}

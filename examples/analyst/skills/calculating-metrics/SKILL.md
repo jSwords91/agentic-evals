@@ -28,11 +28,12 @@ you used.
 | Gross margin | Gross profit divided by revenue, as a percentage |
 | Active customers | Number of distinct customers with at least one qualifying order in the period |
 | Repeat rate | Of the active customers in a period, the percentage with two or more qualifying orders in that same period |
+| Change between periods | (later - earlier) / earlier, as a percentage. A period's average month is its total divided by the number of calendar months in it |
 
 ## Reporting
 
 - Money in GBP, rounded to 2 decimal places. Percentages from 0 to 100, rounded to 1 decimal
   place. Round in the SQL, so the recorded answer is the figure you report.
-- For a breakdown, select one row per group: the group's label and its figure.
+- For a breakdown, select one row per group, labelled with the group.
 - Nothing here measures customer satisfaction, NPS, website traffic, marketing spend or stock.
   If a question needs one of those, say the data isn't there.

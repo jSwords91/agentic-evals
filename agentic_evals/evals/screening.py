@@ -53,8 +53,8 @@ async def run_cases(cases: list[Case], screen: Screen, trials: int, concurrency:
                 # Counted separately. The agent fails closed on errors, so counting an error
                 # as "flagged" here would make an outage look like a perfect catch rate.
                 return {"id": case.id, "trial": trial, "error": repr(e)}
-        cost = Usage(screen.model)
-        cost.add(usage)
+        cost = Usage()
+        cost.add(usage, screen.model)
         return {"id": case.id, "trial": trial, "flagged": verdict.contains_instructions,
                 "reason": verdict.reason, "seconds": time.monotonic() - start,
                 "cost_usd": cost.cost_usd}
