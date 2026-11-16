@@ -33,7 +33,8 @@ the analyst the way you'd build an agent for a real team:
 4. Read the failed transcripts.
 5. Change one thing at a time (the tools, then the definitions, then the prompt), rerun, and
    compare with the previous run.
-6. Find the cheapest model and effort that keep it passing.
+6. Check whether a bigger model is worth its price. The progression runs on the smallest model,
+   Claude Haiku 5.5, so each change has room to show.
 7. Save a baseline and gate future changes on it.
 
 Each step quotes the Anthropic guidance it follows. The notebook is shipped without outputs:
@@ -479,7 +480,7 @@ the design in full. In outline:
    [The environment](#the-environment-what-a-trial-runs-against) to decide what a trial gets
    instead, and write the small `tools(env)` function that hands it to your tools. For the
    analyst, it's a small warehouse with the real schema and seeded rows that include the real
-   traps: test accounts, refunds, discounted prices.
+   traps: test accounts, refunds, discounted prices, and orders from today, which isn't over.
 5. **Write tasks from real requests.** Take them from the team's channel, tickets or logs, in the
    words people used. For each, decide what a right answer is and pick the grader from
    [Choosing a grader](#choosing-a-grader). For the analyst, that's a reference query per

@@ -41,4 +41,4 @@ def test_the_cells_before_the_first_api_call_run():
                 await result
 
     asyncio.run(run_cells())
-    assert len(namespace["suite"].tasks) == 6 and "V1" in namespace
+    assert len(namespace["suite"].tasks) == 11 and "V1" in namespace

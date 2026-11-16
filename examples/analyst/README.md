@@ -58,21 +58,30 @@ answer by a route nobody expected still passes, as it should.
 
 Correctness is graded by code. A judge is never asked whether a number is right.
 
-**`answer`** compares the recorded answer, the rows the team would see, with the result of the
-task's `reference_sql` run on the same warehouse:
+**`answer`** checks that the recorded answer, the rows the team would see, holds the result of
+the task's `reference_sql` run on the same warehouse. It grades whether the answer is right, not
+its layout, because the agent isn't given an output format:
 
-- Column names and column order don't matter. Text is compared without case; numbers within
-  `tolerance` (default 0.01, a penny).
+- Column names and column order don't matter, and extra columns are allowed: an answer that adds
+  the order count beside an average, or the two inputs beside a change, is still right. Text is
+  compared without case; numbers within `tolerance` (default 0.01, a penny).
 - Row order doesn't matter unless the task sets `ordered: true`, as a "top three" does.
-- The number of rows must match, so a breakdown with a missing or extra group fails.
+- The number of rows must match, so a breakdown with a missing or extra group fails. A total row
+  counts as an extra group. That's deliberate: allowing extra rows would also pass a "top three"
+  that lists four.
+
+Allowing extra columns has a cost: an answer that records the right figure beside a wrong one
+also passes. So the single-figure tasks add `reply_states_answer`, which checks the figure the
+person actually reads.
 
 The task stores the reference *query*, not the expected number. So the expected value can't go
 stale if the seed data changes, and anyone reading the task can see exactly what "right" means,
 including which orders count.
 
-**`reply_states_answer`** checks that the reply contains the recorded figure, at whatever
-precision the reply uses: "£4,160.10", "4160.1" and "£4,160" all match 4160.1. That's what makes
-the number a person reads the number the query produced.
+**`reply_states_answer`** checks that the reply states the right figure, at whatever precision
+the reply uses: "£4,160.10", "4160.1" and "£4,160" all match 4160.1. With `answer`, that makes
+the number a person reads the number the query produced. It takes the same `reference_sql`,
+shared with a YAML anchor so the query is written once.
 
 **`no_answer`** passes if nothing was recorded: for a question the data can't answer, no figure
 should reach the team.
@@ -91,6 +100,14 @@ wrong answer. In October:
 | Completed orders, but at list price instead of the price paid | £4,247.50 |
 | Completed orders, no test accounts, price paid: **the agreed definition** | **£4,160.10** |
 
+The warehouse also holds this morning's orders, because today isn't over: "the last 7 days" is
+9 to 15 November (£844.50), not a window that includes today (£967.50).
+
+Some traps aren't in the data at all. Whether a period includes today, how a margin is averaged,
+and how growth is measured are the team's conventions, written in the `calculating-metrics`
+skill. An agent that explores the data carefully still has to know them or guess them, and a
+careful analyst often guesses right.
+
 Each task's comment says which mistake it would catch.
 
 ## The tasks
@@ -105,6 +122,9 @@ Each task's comment says which mistake it would catch.
 | `will_not_delete_data` | regression | A request to change data: refused, and honestly explained |
 | `top_products_by_profit` | capability | Four tables, cost and price, a relative date range, ordering |
 | `repeat_rate_for_a_quarter` | capability | A rate whose numerator and denominator come from the same population |
+| `revenue_last_7_days` | capability | A convention the data can't reveal: whole days, ending yesterday |
+| `gross_margin_by_category` | capability | A ratio of totals, not an average of lines; reported as a percentage |
+| `region_growth_against_q3` | capability | Several steps: an average month, a change between periods, and the right conclusion |
 
 ## Adapting it to your warehouse
 

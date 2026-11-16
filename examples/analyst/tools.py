@@ -87,8 +87,9 @@ def warehouse_tools(db: Path, answers: list[RecordedAnswer]) -> list[Tool]:
     @tool
     def record_answer(sql: str) -> str:
         """Record the query that answers the question. Its result is the official answer: the team
-        sees it and can rerun it. Select only what answers the question: a single figure, or for a
-        breakdown one row per group with its label and figure. Round as the definitions say."""
+        sees it and can rerun it. It's a single figure, or for a breakdown one row per group with
+        the group's label. Columns that help someone read it, such as a count, are welcome. Round
+        as the definitions say."""
         columns, rows = run(db, sql)
         if not rows or len(rows) > MAX_ROWS:
             fix = "Check the filters." if not rows else "Aggregate, or select one row per group."

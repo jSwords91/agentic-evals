@@ -9,7 +9,7 @@ import pytest
 from agentic_evals import ToolError
 from agentic_evals.evals import Task, Trial
 from examples.analyst import tools as analyst
-from examples.analyst.env import Answer, NoAnswer, ReplyStatesAnswer, Warehouse, tools
+from examples.analyst.env import Answer, NoAnswer, ReplyStatesAnswer, Warehouse, matches, tools
 from examples.analyst.tools import RecordedAnswer
 
 OCTOBER = "o.ordered_at >= '2026-10-01' AND o.ordered_at < '2026-11-01'"
@@ -92,6 +92,31 @@ def test_column_order_and_names_do_not_matter_but_row_order_can(warehouse):
     assert not grade(Answer(name="a", reference_sql=by_region, ordered=True), trial(warehouse, swapped)).passed
 
 
+def test_extra_columns_pass_because_the_answer_is_still_right(warehouse):
+    # No output format is imposed, so context beside the figure (here, the order count) is fine.
+    with_count = (f"SELECT COUNT(DISTINCT o.id), ROUND(SUM(i.quantity * i.unit_price), 2) {JOINS} "
+                  f"WHERE o.status = 'completed' AND c.is_test = 0 AND {OCTOBER}")
+    assert grade(Answer(name="a", reference_sql=REVENUE), trial(warehouse, with_count)).passed
+    naive_with_count = f"SELECT COUNT(DISTINCT o.id), ROUND(SUM(i.quantity * i.unit_price), 2) {JOINS} WHERE {OCTOBER}"
+    assert not grade(Answer(name="a", reference_sql=REVENUE), trial(warehouse, naive_with_count)).passed
+
+
+def test_a_missing_or_extra_group_still_fails(warehouse):
+    by_region = f"SELECT c.region, SUM(i.quantity) {JOINS} WHERE {OCTOBER} GROUP BY c.region"
+    missing = by_region.replace("WHERE", "WHERE c.region != 'North' AND")
+    assert not grade(Answer(name="a", reference_sql=by_region), trial(warehouse, missing)).passed
+
+
+@pytest.mark.parametrize("got, expected, passed", [
+    ([("app", 127, 40.65), ("web", 211, 42.83)], [("app", 40.65), ("web", 42.83)], True),
+    ([("app", 42.83), ("web", 40.65)], [("app", 40.65), ("web", 42.83)], False),   # figures swapped
+    ([(1, 2), (1, 3)], [(1,), (1, 2)], True),     # pairs each row with its own match, not the first
+    ([(4160.1,)], [(4160.1, 4160.1)], False),     # one recorded value can't stand for two
+], ids=["context", "swapped", "pairing", "reuse"])
+def test_rows_match_when_each_holds_its_expected_values(got, expected, passed):
+    assert matches(got, expected, 0.01, ordered=False) is passed
+
+
 def test_no_recorded_answer_fails(warehouse):
     assert grade(Answer(name="a", reference_sql=REVENUE), trial(warehouse, None)).detail == "no answer was recorded"
 
@@ -111,5 +136,5 @@ def test_recorded_answers_are_part_of_the_outcome(warehouse):
     ("Revenue was £4,200.", False),            # a different figure
     ("Revenue was £5,903.45.", False),
 ])
-def test_the_reply_must_state_the_recorded_figure(warehouse, reply, passed):
-    assert grade(ReplyStatesAnswer(name="r"), trial(warehouse, REVENUE, reply)).passed is passed
+def test_the_reply_must_state_the_right_figure(warehouse, reply, passed):
+    assert grade(ReplyStatesAnswer(name="r", reference_sql=REVENUE), trial(warehouse, REVENUE, reply)).passed is passed
