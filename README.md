@@ -12,7 +12,7 @@ design.
 Requires Python 3.12+ and [uv](https://docs.astral.sh/uv/).
 
 ```bash
-uv run pytest -q                                                    # 152 offline tests, free
+uv run pytest -q                                                    # 172 offline tests, free
 uv run python -m agentic_evals check examples/analyst/tasks.yaml    # replay reference solutions, free
 
 export ANTHROPIC_API_KEY=...
@@ -72,7 +72,7 @@ Every example has the same parts, and they're what you'd write for your own agen
 ## An agent in a few lines
 
 ```python
-from agentic_evals import Agent, tool
+from agentic_evals import Agent, Hands, Harness, Session, tool
 
 @tool
 def word_count(text: str) -> int:
@@ -80,43 +80,58 @@ def word_count(text: str) -> int:
     return len(text.split())
 
 agent = Agent(system="You are a concise writing assistant.")   # the brain
+session = Session()                                             # the log
 
-async with agent.session([word_count]) as session:              # joined to its hands
-    reply = await session.send("How many words are in 'the quick brown fox jumps'?")
-    print(reply.text, session.tool_log, session.cost_usd)
+async with Hands([word_count]) as hands:                        # the hands
+    reply = await Harness(agent, hands, session).send("How many words are in 'the quick brown fox jumps'?")
+    print(reply.text, session.tool_calls, session.cost_usd)
 ```
 
-Three parts, kept separate, following Anthropic's [Managed Agents](https://www.anthropic.com/research/managed-agents)
-design of a brain, hands and a session:
+Three parts with narrow interfaces between them, following Anthropic's
+[Managed Agents](https://www.anthropic.com/research/managed-agents) design:
 
-- **The brain**, an `Agent`: the prompt, the model, the effort, the limits, the skills and the
-  injection screen. It holds no tools and no resources, so it's a plain constant you can share,
-  compare and change with `dataclasses.replace(agent, model=...)`.
-- **The hands**, the tools: `@tool` functions and MCP servers, in one list. Tools that need a
-  database or a client get it when the list is built.
-- **The session**: one conversation joining a brain to a set of hands. It holds the message
-  history, the log of tool calls and the cost. Each eval trial gets a new one.
+- **The brain**, "Claude and its harness". `Agent` is what the brain is told and allowed to do:
+  the prompt, the model, the effort, the limits, the skills and the injection screen. It holds no
+  tools, no resources and no state, so it's a plain constant you can share, compare and change
+  with `dataclasses.replace(agent, model=...)`. `Harness` is the loop that calls Claude and routes
+  its tool calls. It keeps nothing of its own: it reads the conversation from the session and
+  writes every step back.
+- **The hands**, "sandboxes and tools that perform actions". `Hands` holds `@tool` functions and
+  MCP servers behind one interface: a name and input in, a result out. Tools that need a database,
+  a client or a credential get it when they're built, so the harness and the session never see it.
+- **The session**, "the append-only log of everything that happened". `Session` is that log, in
+  memory or on disk. The messages sent to the model, the tool calls graders check and the bill are
+  all read from it, so a new harness given the same session carries on where the last one stopped
+  (`harness.resume()`).
 
 Keeping them apart is what lets an eval run the same tasks against two versions of a prompt, two
 models or two sets of tools, and lets production and evals share every line of the agent's code.
+It's also checked, not just claimed: `tests/test_boundaries.py` fails if one part imports another
+it shouldn't.
+
+Managed Agents runs the hands in sandboxes, on other machines, behind a credential vault. This
+repository keeps the same interfaces in one process, because nothing at this scale needs the rest.
 
 ## How it fits together
 
 ```
-   the brain: Agent                                 the hands: a list of tools
+   the brain: Agent                                 the hands: Hands(tools)
    prompt, model, effort, limits                    @tool functions, run in-process
    skills/*/SKILL.md, listed in the prompt          MCP servers: stdio, HTTP or in-process
-   Screen (Haiku): checks text marked <untrusted>
+   Screen (Haiku): checks text marked <untrusted>   execute(name, input) -> result
                  │                                                │
                  └──────────────────────┬─────────────────────────┘
                                         │
-                     Session = agent.session(tools): one conversation
+                     Harness(agent, hands, session): the loop
                        calls the model, runs the tools it asks for (concurrently),
                        returns results in one message, stops at max_turns or max_cost
+                                        │
+                     Session: the append-only log every step is written to,
+                       and everything else is read from
 
 evaluate(suite, agent=..., tools=...)        or: python -m agentic_evals run tasks.yaml
   for each task, for each trial:
-    fresh Environment ─> agent.session(tools(env)).send(task.input)
+    fresh Environment and Session ─> Harness(agent, Hands(tools(env)), session).send(task.input)
                       ─> code graders read the final state, the tool calls and the reply
                       ─> an LLM judge reads the reply, one call per criterion
                       ─> transcript
@@ -177,7 +192,7 @@ answers. The brain and the tools' code are the same in both. See `examples/helpd
 ### MCP servers
 
 ```python
-agent.session([convert_time, stdio("python", "-m", "my_server", env={"DB": path})])
+Hands([convert_time, stdio("python", "-m", "my_server", env={"DB": path})])
 ```
 
 An MCP server goes in the same list as local tools. It can be anything `mcp.Client` accepts:
@@ -543,7 +558,10 @@ use it in the tasks file as `type: reply_word_limit`. The examples have three mo
 | `agentic_evals/mcp.py` | MCP servers as tools |
 | `agentic_evals/skills.py` | Skills and `load_skill` |
 | `agentic_evals/screen.py` | `untrusted()` and the screen |
-| `agentic_evals/agent.py` | `Agent` (the brain), `Session` (brain plus tools) and the loop |
+| `agentic_evals/hands.py` | `Hands`: the tools, behind one interface |
+| `agentic_evals/agent.py` | `Agent`: the brain's configuration |
+| `agentic_evals/session.py` | `Session`: the append-only log of a conversation |
+| `agentic_evals/harness.py` | `Harness`: the loop, and `resume` after a crash |
 | `agentic_evals/usage.py` | Tokens and cost |
 | `agentic_evals/evals/environment.py` | The `Environment` base class: the world a trial runs in |
 | `agentic_evals/evals/tasks.py` | Tasks and suites, from a file or from code |
@@ -555,7 +573,7 @@ use it in the tasks file as `type: reply_word_limit`. The examples have three mo
 | `agentic_evals/__main__.py` | The command line |
 | `examples/analyst/` | Trustworthy numbers: schema from tools, definitions in a skill, answers graded against reference queries |
 | `examples/assistant/` | MCP, skills, the screen, rules in code, and safety tasks |
-| `tests/` | 152 offline tests, including the notebook's offline cells |
+| `tests/` | 172 offline tests, including the notebook's offline cells |
 | `.github/workflows/evals.yml` | Lint, tests and every example's reference solutions on each PR; the gated regression suites when a key is set; capability nightly |
 
 ## Design notes
@@ -581,7 +599,7 @@ grep -rn "\[DE\]" --include=*.py --include=*.yaml .
 | A1 | One loop. Tool calls in a batch run concurrently and their results go back in one message |
 | A2 | The harness enforces turn and cost limits; the model isn't asked to |
 | A3 | Simplest design first: no router, planner or subagents. A separate model judges, never the agent itself |
-| A4 | Brain (`Agent`), hands (tools) and session are separate; the eval world is separate from all three, so any agent can be evaluated with any tools against the same tasks |
+| A4 | Brain (`Agent` and `Harness`), hands (`Hands`) and session (`Session`, an append-only log) are separate, with the dependencies checked by a test; the harness keeps no state, so a new one resumes from the session. The eval world is separate from all three, so any agent can be evaluated with any tools against the same tasks |
 | A5 | A tool that fails returns an error the model can see, not a crashed conversation |
 | A6 | A refusal or cut-off response ends the turn, and any tool calls in it are answered so the history stays valid |
 

@@ -8,6 +8,7 @@ from typing import Any
 import anthropic
 import httpx2
 import pytest
+from anthropic.types.beta import BetaTextBlock, BetaToolUseBlock
 
 from agentic_evals.evals import graders
 from agentic_evals.screen import Verdict as ScreenVerdict
@@ -22,12 +23,13 @@ def response(stop_reason: str, *content: Any) -> SimpleNamespace:
     return SimpleNamespace(stop_reason=stop_reason, content=list(content), usage=USAGE)
 
 
-def text(t: str) -> SimpleNamespace:
-    return SimpleNamespace(type="text", text=t)
+# Real SDK content blocks, so the harness serialises exactly what it would from the API.
+def text(t: str) -> BetaTextBlock:
+    return BetaTextBlock(type="text", text=t)
 
 
-def tool_use(id: str, name: str, /, **input: Any) -> SimpleNamespace:
-    return SimpleNamespace(type="tool_use", id=id, name=name, input=input)
+def tool_use(id: str, name: str, /, **input: Any) -> BetaToolUseBlock:
+    return BetaToolUseBlock(type="tool_use", id=id, name=name, input=input)
 
 
 def default_parse(request: dict) -> Any:

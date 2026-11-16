@@ -11,7 +11,7 @@ documentation for the model. Write it for a capable new colleague: what the tool
 to use it, and anything surprising about its arguments or results [TOOLS].
 
 Tools from MCP servers (see mcp.py) become the same `Tool` type, so the agent loop never needs
-to know where a tool lives.
+to know where a tool lives. `execute` is the one way any tool is run.
 """
 
 from __future__ import annotations
@@ -20,7 +20,7 @@ import asyncio
 import inspect
 import json
 import typing
-from collections.abc import Awaitable, Callable
+from collections.abc import Awaitable, Callable, Sequence
 from dataclasses import dataclass
 from typing import Any
 
@@ -52,6 +52,43 @@ class Tool:
         """The tool definition the Messages API expects."""
         return {"name": self.name, "description": self.description,
                 "input_schema": self.input_schema, "strict": self.strict}
+
+
+@dataclass(frozen=True)
+class ToolCall:
+    """One tool run: what was asked for and what came back."""
+    name: str
+    input: dict[str, Any]
+    output: str
+    is_error: bool
+
+
+async def execute(tool: Tool | None, name: str, args: dict[str, Any]) -> ToolCall:
+    """Run one tool call. Every outcome, including a crash, becomes output the model can read.
+
+    A5 [TOOLS]: a broken tool becomes an error the model can see and work around, not a crashed
+      conversation.
+    """
+    try:
+        if tool is None:
+            raise ToolError(f"There is no tool called {name!r}.")
+        return ToolCall(name, args, await tool.run(args), False)
+    except ToolError as e:
+        return ToolCall(name, args, str(e), True)
+    except Exception as e:
+        return ToolCall(name, args, f"{name} failed: {type(e).__name__}: {e}", True)
+
+
+def index(tools: Sequence[Tool]) -> dict[str, Tool]:
+    """Tools by name, in a fixed order. Two tools with one name are a configuration error.
+
+    C3: the order is fixed because the tool list is the first thing in every request, so any
+      change to it (even its order) would invalidate the whole prompt cache.
+    """
+    names = [t.name for t in tools]
+    if duplicates := sorted({n for n in names if names.count(n) > 1}):
+        raise ValueError(f"More than one tool is called {', '.join(duplicates)}.")
+    return {t.name: t for t in sorted(tools, key=lambda t: t.name)}
 
 
 def tool(fn: Callable[..., Any] | None = None, *, name: str | None = None) -> Any:

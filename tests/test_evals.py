@@ -146,7 +146,8 @@ def test_a_whole_trial_passes_and_writes_a_readable_transcript(tmp_path):
     transcript = json.loads(Path(result["transcript"]).read_text())
     assert transcript["input"] == TASK["input"] and transcript["environment"] == {"notes": ["cat fed"]}
     assert [c["name"] for c in transcript["tool_log"]] == ["add_note"]
-    assert [m["role"] for m in transcript["messages"]] == ["user", "assistant", "user", "assistant"]
+    assert [e["type"] for e in transcript["session"]] == [
+        "user_message", "model_response", "tool_result", "model_response"]
     assert transcript["model_calls"] == 2 and transcript["cost_usd"] > 0
 
 

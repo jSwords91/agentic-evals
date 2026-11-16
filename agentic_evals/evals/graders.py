@@ -32,7 +32,7 @@ from typing import TYPE_CHECKING, Any, ClassVar, Literal
 import anthropic
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
-from ..agent import ToolCall
+from ..tools import ToolCall
 from .environment import Environment
 
 if TYPE_CHECKING:

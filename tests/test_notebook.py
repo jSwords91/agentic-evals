@@ -31,7 +31,7 @@ def test_every_code_cell_compiles():
 
 
 def test_the_cells_before_the_first_api_call_run():
-    first_call = next(i for i, c in enumerate(CELLS) if ".session(" in source(c) or "await evaluate(" in source(c))
+    first_call = next(i for i, c in enumerate(CELLS) if "Harness(" in source(c) or "await evaluate(" in source(c))
     namespace: dict = {}
 
     async def run_cells() -> None:
